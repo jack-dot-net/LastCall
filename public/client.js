@@ -75,6 +75,64 @@ function saveName(n) { try { localStorage.setItem('liarsbar.name', n); } catch {
 const savedName = loadName();
 if (savedName) $('name-input').value = savedName;
 
+// View mode (3D default, 2D fallback)
+function loadViewMode() {
+  try { return localStorage.getItem('liarsbar.view') || '3d'; } catch { return '3d'; }
+}
+function saveViewMode(v) { try { localStorage.setItem('liarsbar.view', v); } catch {} }
+let _stageInitialized = false;
+function applyViewMode(v) {
+  document.body.classList.toggle('view-2d', v === '2d');
+  const btn = $('btn-view-toggle');
+  if (btn) btn.textContent = v === '2d' ? '3D View' : '2D View';
+  if (v === '3d') {
+    initStageIfReady();
+    if (window.Stage && window.Stage.isReady && window.Stage.isReady()) window.Stage.resume();
+  } else if (window.Stage && window.Stage.pause) {
+    window.Stage.pause();
+  }
+}
+function initStageIfReady() {
+  if (_stageInitialized) return true;
+  if (!window.THREE || !window.Stage) return false;
+  const canvas = $('stage-canvas');
+  if (!canvas) return false;
+  const parent = canvas.parentElement;
+  if (!parent || parent.clientHeight === 0) return false;
+  if (window.Stage.init(canvas)) {
+    _stageInitialized = true;
+    if (state) {
+      window.Stage.update(state);
+      updateStageOverlay();
+    }
+    return true;
+  }
+  return false;
+}
+applyViewMode(loadViewMode());
+if ($('btn-view-toggle')) {
+  $('btn-view-toggle').onclick = () => {
+    const next = document.body.classList.contains('view-2d') ? '3d' : '2d';
+    saveViewMode(next);
+    applyViewMode(next);
+    if (state) render();
+  };
+}
+
+function updateStageOverlay() {
+  if (!state) return;
+  const mb = $('mode-badge-3d');
+  if (mb) mb.textContent = MODE_LABELS[state.gameMode] || '';
+  const ti = $('turn-info-3d');
+  if (ti) {
+    const me = state.players.find(p => p.id === state.yourId);
+    const myIdx = state.players.findIndex(p => p.id === state.yourId);
+    const myTurn = myIdx === state.currentPlayerIdx && me && me.alive;
+    const current = state.players[state.currentPlayerIdx];
+    ti.textContent = current ? (myTurn ? 'Your turn.' : `Waiting for ${current.name}…`) : '';
+  }
+}
+
 // ============================================================
 // SPRITES
 // ============================================================
@@ -342,8 +400,14 @@ socket.on('roomUpdate', (s) => {
   state = s;
   render();
 });
-socket.on('reveal', (data) => showReveal(data));
-socket.on('shot', (data) => showShot(data));
+socket.on('reveal', (data) => {
+  showReveal(data);
+  if (window.Stage && window.Stage.isReady()) window.Stage.reveal(data);
+});
+socket.on('shot', (data) => {
+  showShot(data);
+  if (window.Stage && window.Stage.isReady()) window.Stage.shot(data);
+});
 
 // ============================================================
 // RENDER
@@ -398,6 +462,15 @@ function renderGame() {
   else if (state.gameMode === 'poker') renderPokerMode();
 
   renderLog();
+
+  // 3D stage
+  if (!document.body.classList.contains('view-2d')) {
+    if (!_stageInitialized) initStageIfReady();
+    if (window.Stage && window.Stage.isReady()) {
+      window.Stage.update(state);
+      updateStageOverlay();
+    }
+  }
 }
 
 function renderPlayers() {
