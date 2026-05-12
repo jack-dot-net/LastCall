@@ -193,6 +193,7 @@ $('btn-bid').onclick = () => {
   socket.emit('gameAction', { action: 'play', payload: { qty: bidQty, face: bidFace } });
 };
 $('btn-liar-dice').onclick = () => socket.emit('gameAction', { action: 'liar' });
+$('btn-spoton-dice').onclick = () => socket.emit('gameAction', { action: 'spoton' });
 
 function bidVal(qty, face) { return qty * 7 + face; }
 
@@ -234,6 +235,7 @@ function renderDiceControls() {
   if (state?.totalDiceInPlay && bidQty > state.totalDiceInPlay) legal = false;
   bidBtn.disabled = !myTurn || !legal;
   $('btn-liar-dice').disabled = !myTurn || !state?.lastBid;
+  $('btn-spoton-dice').disabled = !myTurn || !state?.lastBid;
 }
 
 // ============================================================
@@ -677,6 +679,26 @@ function makeLogEntry(entry) {
       div.appendChild(document.createTextNode('!'));
       break;
     }
+    case 'spoton': {
+      const ico = document.createElement('span');
+      ico.className = 'log-icon spoton-target';
+      ico.textContent = '🎯';
+      div.appendChild(ico);
+      const caller = document.createElement('span');
+      caller.className = 'log-player';
+      caller.textContent = data.caller || '';
+      div.appendChild(caller);
+      const middle = document.createElement('span');
+      middle.className = 'log-spoton-text';
+      middle.textContent = ' calls SPOT ON on ';
+      div.appendChild(middle);
+      const accused = document.createElement('span');
+      accused.className = 'log-player';
+      accused.textContent = data.accused || '';
+      div.appendChild(accused);
+      div.appendChild(document.createTextNode('!'));
+      break;
+    }
     case 'verdict-truth':
     case 'verdict-lie': {
       const tag = document.createElement('span');
@@ -750,7 +772,10 @@ function renderGameOver() {
 function showReveal(data) {
   const overlay = $('reveal-overlay');
   const body = $('reveal-body');
+  const title = $('reveal-title');
   body.innerHTML = '';
+  title.textContent = data.callType === 'spoton' ? 'SPOT ON CALLED!' : 'LIAR CALLED!';
+  title.classList.toggle('spot', data.callType === 'spoton');
 
   if (data.mode === 'cards') {
     const row = document.createElement('div');
@@ -783,7 +808,11 @@ function showReveal(data) {
       grid.appendChild(block);
     }
     body.appendChild(grid);
-    $('reveal-verdict').textContent = data.bidMet ? 'Bid stands — challenger loses.' : 'Bid busts — bidder loses.';
+    if (data.callType === 'spoton') {
+      $('reveal-verdict').textContent = data.exact ? 'Exact hit — bidder pulls the trigger.' : `Off by ${Math.abs(data.count - data.qty)} — caller pulls the trigger.`;
+    } else {
+      $('reveal-verdict').textContent = data.bidMet ? 'Bid stands — challenger loses.' : 'Bid busts — bidder loses.';
+    }
   } else if (data.mode === 'poker') {
     const summary = document.createElement('div');
     summary.className = 'reveal-summary';

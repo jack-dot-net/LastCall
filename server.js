@@ -362,7 +362,42 @@ const diceGame = {
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {
-      mode: 'dice', qty, face, count, bidMet, allDice,
+      mode: 'dice', callType: 'liar', qty, face, count, bidMet, allDice,
+      bidderId: bidder.id, callerId: caller.id, loserId: loser.id,
+    });
+    broadcastRoom(room);
+    performShot(room, loser.id, caller.id, bidder.id);
+  },
+  handleSpotOn(room, socket) {
+    const callerIdx = room.players.findIndex(p => p.id === socket.id);
+    if (callerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
+    if (!room.lastBid) return socket.emit('errorMsg', 'No bid yet.');
+
+    const caller = room.players[callerIdx];
+    const bidder = room.players[room.lastBid.playerIdx];
+    const { qty, face } = room.lastBid;
+
+    let count = 0;
+    const allDice = [];
+    for (const p of room.players) {
+      if (p.alive) {
+        allDice.push({ playerId: p.id, name: p.name, dice: p.dice.slice() });
+        for (const d of p.dice) {
+          if (d === face || (d === 1 && face !== 1)) count++;
+        }
+      }
+    }
+
+    const exact = count === qty;
+    const loser = exact ? bidder : caller;
+
+    addLog(room, `${caller.name} calls SPOT ON on ${bidder.name}!`, 'spoton', { caller: caller.name, accused: bidder.name });
+    addLog(room, `Bid ${qty} × ${face} — found ${count}. ${exact ? 'SPOT ON!' : 'Off — missed by ' + Math.abs(count - qty) + '.'}`, exact ? 'verdict-truth' : 'verdict-lie', { mode: 'dice', qty, face, count });
+    addLog(room, `${loser.name} pulls the trigger…`, 'tension');
+
+    room.resolving = true;
+    io.to(room.code).emit('reveal', {
+      mode: 'dice', callType: 'spoton', qty, face, count, exact, allDice,
       bidderId: bidder.id, callerId: caller.id, loserId: loser.id,
     });
     broadcastRoom(room);
@@ -680,6 +715,7 @@ io.on('connection', (socket) => {
     if (!mode) return;
     if (action === 'play') mode.handlePlay(room, socket, payload || {});
     else if (action === 'liar') mode.handleLiar(room, socket);
+    else if (action === 'spoton' && mode.handleSpotOn) mode.handleSpotOn(room, socket);
   });
 
   socket.on('leaveRoom', () => handleLeave());
