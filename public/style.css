@@ -569,6 +569,410 @@ button.small { font-size: 0.85rem; padding: 0.4rem 0.8rem; }
   animation: pop 0.2s;
 }
 
+/* ───────────── MODE SELECTOR (LOBBY) ───────────── */
+.mode-selector {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.7rem;
+}
+.mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.8rem 0.4rem;
+  background: var(--bg-dark);
+  border: 2px solid var(--wood);
+  color: var(--cream);
+  transition: all 0.15s;
+}
+.mode-btn .mode-icon { font-size: 1.8rem; line-height: 1; }
+.mode-btn .mode-label { font-size: 0.78rem; font-variant: small-caps; letter-spacing: 0.05em; line-height: 1.1; }
+.mode-btn.active {
+  background: var(--bg-light);
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.35), inset 0 0 12px rgba(255, 215, 0, 0.1);
+  color: var(--gold-bright);
+}
+.mode-hint {
+  font-size: 0.8rem;
+  color: var(--wood-light);
+  font-style: italic;
+  margin: 0.2rem 0 0.6rem;
+  text-align: center;
+  min-height: 1.4em;
+}
+
+/* ───────────── GAME CENTER ───────────── */
+.mode-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-variant: small-caps;
+  letter-spacing: 0.18em;
+  color: var(--gold);
+  background: rgba(107, 68, 35, 0.4);
+  padding: 0.2rem 0.7rem;
+  border-radius: 2px;
+  margin-bottom: 0.5rem;
+}
+.ctr-label {
+  font-size: 0.8rem;
+  color: var(--wood-light);
+  font-variant: small-caps;
+  letter-spacing: 0.15em;
+  margin-bottom: 0.3rem;
+}
+.ctr-value {
+  font-size: 1.9rem;
+  color: var(--gold-bright);
+  font-weight: bold;
+  font-variant: small-caps;
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+  margin-bottom: 0.6rem;
+}
+.bid-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+.bid-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+.bid-qty {
+  font-size: 2.4rem;
+  color: var(--gold-bright);
+  font-weight: bold;
+  text-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+}
+.bid-x { font-size: 1.4rem; color: var(--wood-light); }
+
+/* ───────────── GAME-MODE PANELS ───────────── */
+.game-mode {
+  animation: fadeIn 0.3s;
+}
+.your-label {
+  font-size: 0.8rem;
+  color: var(--wood-light);
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+  text-align: center;
+  margin-bottom: 0.4rem;
+}
+.hand-empty {
+  align-self: center;
+  font-style: italic;
+  color: var(--wood-light);
+  opacity: 0.8;
+  padding: 1rem;
+}
+
+/* ───────────── GAME ACTIONS ───────────── */
+.game-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  align-items: stretch;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+.game-actions button.primary,
+.game-actions button.danger {
+  min-width: 140px;
+  padding: 0.8rem 1.2rem;
+  font-size: 0.95rem;
+}
+
+/* ───────────── DICE (SPRITE) ───────────── */
+.die {
+  width: 52px;
+  height: 52px;
+  background: linear-gradient(145deg, #fdf7e8, #d4c8a8);
+  border: 1.5px solid #5a3a18;
+  border-radius: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  padding: 6px;
+  box-shadow:
+    inset 0 -3px 5px rgba(90, 58, 24, 0.2),
+    inset 0 2px 3px rgba(255, 255, 255, 0.6),
+    0 4px 8px rgba(0, 0, 0, 0.5);
+  position: relative;
+  flex-shrink: 0;
+}
+.die .pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #6b4423 0%, #1a0e08 80%);
+  align-self: center;
+  justify-self: center;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15);
+}
+.die.highlight {
+  background: linear-gradient(145deg, #ffefb0, #d4a040);
+  border-color: var(--gold-bright);
+  box-shadow:
+    0 0 16px rgba(255, 215, 0, 0.6),
+    inset 0 -3px 5px rgba(90, 58, 24, 0.2),
+    0 4px 8px rgba(0, 0, 0, 0.5);
+}
+.die.dim { opacity: 0.5; filter: grayscale(0.4); }
+@keyframes diceRoll {
+  0% { transform: rotate(0deg) scale(0.5); opacity: 0; }
+  50% { transform: rotate(360deg) scale(1.1); opacity: 1; }
+  100% { transform: rotate(720deg) scale(1); opacity: 1; }
+}
+.die.rolling { animation: diceRoll 0.6s; }
+
+.dice-tray {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 0.8rem 0.5rem;
+  background: radial-gradient(ellipse at center, rgba(60, 30, 12, 0.5), transparent 70%);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  min-height: 70px;
+}
+.dice-tray.small { padding: 0.3rem; min-height: 0; gap: 0.3rem; }
+.dice-tray.small .die { width: 36px; height: 36px; padding: 4px; }
+.dice-tray.small .die .pip { width: 5px; height: 5px; }
+
+#dice-area { margin-bottom: 0.8rem; }
+
+/* ───────────── BID CONTROLS ───────────── */
+.bid-controls {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.bid-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+.bid-control label {
+  font-size: 0.7rem;
+  color: var(--wood-light);
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+}
+.qty-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg-dark);
+  border: 1.5px solid var(--wood);
+  border-radius: 4px;
+  padding: 0.2rem 0.4rem;
+}
+#qty-value {
+  min-width: 1.8rem;
+  text-align: center;
+  font-size: 1.4rem;
+  color: var(--gold-bright);
+  font-weight: bold;
+}
+.step-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+  background: var(--wood);
+  border-radius: 4px;
+}
+.face-picker {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.face-btn {
+  padding: 0.2rem;
+  background: transparent;
+  border: 2px solid transparent;
+  position: relative;
+  border-radius: 8px;
+}
+.face-btn.active {
+  border-color: var(--gold-bright);
+  background: rgba(255, 215, 0, 0.08);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+}
+.face-btn .die { width: 38px; height: 38px; padding: 4px; }
+.face-btn .die .pip { width: 5px; height: 5px; }
+.wild-tag {
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.55rem;
+  font-weight: bold;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  background: var(--bg-dark);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--gold);
+}
+
+/* ───────────── POKER CARDS (SPRITE) ───────────── */
+.poker-card {
+  width: 60px;
+  height: 86px;
+  background: linear-gradient(180deg, #fefefe 0%, #f0e8d8 100%);
+  border: 1.5px solid #2d1810;
+  border-radius: 6px;
+  position: relative;
+  color: #1a0e08;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  font-family: Georgia, serif;
+  flex-shrink: 0;
+  user-select: none;
+  transition: transform 0.15s;
+}
+.poker-card:hover { transform: translateY(-4px); box-shadow: 0 8px 14px rgba(0, 0, 0, 0.5); }
+.poker-card.suit-h, .poker-card.suit-d { color: #b00; }
+.poker-card.suit-s, .poker-card.suit-c { color: #111; }
+.poker-card .pc-corner {
+  position: absolute;
+  font-size: 0.7rem;
+  font-weight: bold;
+  line-height: 1;
+  text-align: center;
+}
+.poker-card .pc-top { top: 4px; left: 4px; }
+.poker-card .pc-bot {
+  bottom: 4px;
+  right: 4px;
+  transform: rotate(180deg);
+}
+.poker-card .pc-center {
+  font-size: 2rem;
+  line-height: 1;
+}
+.poker-card.flipped { animation: cardFlip 0.5s; }
+@keyframes cardFlip {
+  0% { transform: rotateY(180deg) scale(0.7); opacity: 0; }
+  60% { transform: rotateY(0deg) scale(1.05); opacity: 1; }
+  100% { transform: rotateY(0deg) scale(1); opacity: 1; }
+}
+
+.poker-tray {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.5rem;
+  background: radial-gradient(ellipse at center, rgba(60, 30, 12, 0.5), transparent 70%);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  min-height: 100px;
+}
+.poker-tray.small { padding: 0.3rem; min-height: 0; gap: 0.3rem; }
+.poker-tray.small .poker-card { width: 40px; height: 58px; }
+.poker-tray.small .pc-corner { font-size: 0.55rem; }
+.poker-tray.small .pc-center { font-size: 1.3rem; }
+
+#poker-hand-area { margin-bottom: 0.8rem; }
+
+/* ───────────── DECL CONTROLS ───────────── */
+.decl-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.decl-control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+.decl-control label {
+  font-size: 0.7rem;
+  color: var(--wood-light);
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+.decl-control select {
+  background: var(--bg-dark);
+  color: var(--cream);
+  border: 1.5px solid var(--wood);
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  outline: none;
+}
+.decl-control select:focus { border-color: var(--gold); }
+.decl-control select:disabled { opacity: 0.4; }
+
+/* ───────────── REVEAL LAYOUTS ───────────── */
+.reveal-cards-row {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin: 0.8rem 0;
+  flex-wrap: wrap;
+}
+.reveal-summary {
+  font-size: 1rem;
+  color: var(--cream);
+  margin: 0.5rem 0 0.8rem;
+}
+.reveal-summary b { color: var(--gold-bright); }
+.reveal-dice-grid, .reveal-hands-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.reveal-player-block {
+  background: rgba(45, 24, 16, 0.6);
+  border: 1px solid var(--wood);
+  border-radius: 6px;
+  padding: 0.4rem;
+}
+.rev-name {
+  font-size: 0.8rem;
+  font-weight: bold;
+  color: var(--gold);
+  margin-bottom: 0.3rem;
+  text-align: center;
+}
+.reveal-box {
+  max-width: min(720px, 92vw);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* Player count style (alias for old .player-cards) */
+.player-count {
+  font-size: 1.1rem;
+  color: var(--gold);
+  margin-bottom: 0.4rem;
+}
+
 /* ───────────── RESPONSIVE ───────────── */
 
 /* Disable sticky :hover effects on touch devices */
@@ -662,6 +1066,28 @@ button.small { font-size: 0.85rem; padding: 0.4rem 0.8rem; }
 
   .menu-wrap { margin-top: 2vh; padding: 0 0.4rem; }
   .menu-card { padding: 1.5rem 1rem; }
+
+  .mode-btn .mode-icon { font-size: 1.4rem; }
+  .mode-btn .mode-label { font-size: 0.7rem; }
+  .die { width: 44px; height: 44px; padding: 5px; }
+  .die .pip { width: 6px; height: 6px; }
+  .face-btn .die { width: 32px; height: 32px; padding: 3px; }
+  .face-btn .die .pip { width: 4px; height: 4px; }
+  .dice-tray.small .die { width: 30px; height: 30px; padding: 3px; }
+  .dice-tray.small .die .pip { width: 4px; height: 4px; }
+  .poker-card { width: 50px; height: 72px; }
+  .poker-card .pc-corner { font-size: 0.6rem; }
+  .poker-card .pc-center { font-size: 1.6rem; }
+  .poker-tray.small .poker-card { width: 34px; height: 50px; }
+  .poker-tray.small .pc-corner { font-size: 0.5rem; }
+  .poker-tray.small .pc-center { font-size: 1.1rem; }
+  .bid-qty { font-size: 1.8rem; }
+  .ctr-value { font-size: 1.4rem; }
+  .game-actions button.primary,
+  .game-actions button.danger { min-width: 110px; font-size: 0.85rem; padding: 0.7rem 0.6rem; }
+  .player-count { font-size: 0.9rem; margin-bottom: 0.2rem; }
+  .decl-control select { font-size: 0.85rem; padding: 0.4rem 0.5rem; }
+  .reveal-dice-grid, .reveal-hands-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 
   .reveal-box { padding: 1.5rem 1rem; }
   .reveal-title { font-size: 1.4rem; }

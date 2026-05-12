@@ -31,20 +31,10 @@
     <details class="rules">
       <summary>How to play</summary>
       <div class="rules-body">
-        <p><b>Deck:</b> 6 Kings, 6 Queens, 6 Aces, 2 Jokers (Jokers are wild).</p>
-        <p><b>Each round</b> a "table card" is announced (e.g. King). Everyone is dealt 5 cards.</p>
-        <p>On your turn, either:</p>
-        <ul>
-          <li><b>Play 1–3 cards face down</b>, claiming they are all the table card (or Jokers).</li>
-          <li><b>Call LIAR!</b> on the previous player.</li>
-        </ul>
-        <p>If you call LIAR, the last cards played are revealed.</p>
-        <ul>
-          <li>If they were lying, <b>they</b> pull the trigger.</li>
-          <li>If they were truthful, <b>you</b> pull the trigger.</li>
-        </ul>
-        <p>Each gun has 6 chambers and 1 bullet at a random position. The chamber advances with every shot — it gets more dangerous the longer you live.</p>
-        <p>Last one breathing wins the bar.</p>
+        <p><b>Three modes, one revolver.</b> Whichever you pick, the loser of a LIAR call pulls the trigger on their own gun (6 chambers, 1 bullet, chamber advances every shot). Last one breathing wins.</p>
+        <p><b>Liar's Cards.</b> Deck of Kings, Queens, Aces, and 2 wild Jokers. Each round picks a table card. On your turn, play 1–3 cards face down claiming they match — or call LIAR.</p>
+        <p><b>Liar's Dice.</b> Everyone rolls 5 hidden dice. Bid <i>total quantity × face</i> across all dice. Each next bid must increase (higher qty, or same qty higher face). 1s are wild (count as any face). Call LIAR to reveal.</p>
+        <p><b>Bluff Poker.</b> Each player is dealt 5 cards. Declare a poker hand (pair, two pair, three, straight, flush, full house, quads, straight flush) of strictly increasing rank — claiming it exists across <i>everyone's combined cards</i>. Call LIAR and reveal all.</p>
       </div>
     </details>
   </div>
@@ -56,6 +46,24 @@
     <p>Share this code with friends:</p>
     <div class="room-code-display" id="room-code"></div>
     <button id="btn-copy-code" class="ghost small">Copy code</button>
+
+    <h3>Game Mode</h3>
+    <div class="mode-selector">
+      <button class="mode-btn" data-mode="cards">
+        <div class="mode-icon">🂠</div>
+        <div class="mode-label">Liar's Cards</div>
+      </button>
+      <button class="mode-btn" data-mode="dice">
+        <div class="mode-icon">🎲</div>
+        <div class="mode-label">Liar's Dice</div>
+      </button>
+      <button class="mode-btn" data-mode="poker">
+        <div class="mode-icon">♠</div>
+        <div class="mode-label">Bluff Poker</div>
+      </button>
+    </div>
+    <p class="mode-hint" id="mode-hint"></p>
+
     <h3>Players</h3>
     <ul id="player-list"></ul>
     <div class="lobby-actions">
@@ -73,19 +81,73 @@
 
   <div class="game-center">
     <div id="table-info">
-      <div class="table-label">Table Card</div>
-      <div id="table-card" class="table-card-display">?</div>
-      <div id="pile-info" class="pile-info"></div>
+      <div id="mode-badge" class="mode-badge"></div>
+      <div id="center-display"></div>
       <div id="turn-info" class="turn-info"></div>
     </div>
   </div>
 
   <div class="game-bottom">
-    <div id="hand-area"></div>
-    <div id="actions">
-      <button id="btn-play" class="primary" disabled>Play Selected</button>
-      <button id="btn-liar" class="danger" disabled>Call LIAR!</button>
+    <!-- CARDS MODE -->
+    <div id="game-cards" class="game-mode">
+      <div id="hand-area"></div>
+      <div class="game-actions">
+        <button id="btn-play-cards" class="primary" disabled>Play Selected</button>
+        <button id="btn-liar-cards" class="danger" disabled>Call LIAR!</button>
+      </div>
     </div>
+
+    <!-- DICE MODE -->
+    <div id="game-dice" class="game-mode">
+      <div id="dice-area"></div>
+      <div class="game-actions dice-actions">
+        <div class="bid-controls">
+          <div class="bid-control">
+            <label>Quantity</label>
+            <div class="qty-row">
+              <button class="step-btn" id="qty-down">−</button>
+              <span id="qty-value">1</span>
+              <button class="step-btn" id="qty-up">+</button>
+            </div>
+          </div>
+          <div class="bid-control">
+            <label>Face</label>
+            <div id="face-picker" class="face-picker"></div>
+          </div>
+          <button id="btn-bid" class="primary">Raise Bid</button>
+        </div>
+        <button id="btn-liar-dice" class="danger" disabled>Call LIAR!</button>
+      </div>
+    </div>
+
+    <!-- POKER MODE -->
+    <div id="game-poker" class="game-mode">
+      <div id="poker-hand-area"></div>
+      <div class="game-actions poker-actions">
+        <div class="decl-controls">
+          <div class="decl-control">
+            <label>Hand</label>
+            <select id="decl-type">
+              <option value="pair">Pair</option>
+              <option value="twopair">Two Pair</option>
+              <option value="three">Three of a Kind</option>
+              <option value="straight">Straight</option>
+              <option value="flush">Flush</option>
+              <option value="fullhouse">Full House</option>
+              <option value="quads">Four of a Kind</option>
+              <option value="straightflush">Straight Flush</option>
+            </select>
+          </div>
+          <div class="decl-control">
+            <label>Rank</label>
+            <select id="decl-rank"></select>
+          </div>
+          <button id="btn-declare" class="primary">Declare</button>
+        </div>
+        <button id="btn-liar-poker" class="danger" disabled>Call LIAR!</button>
+      </div>
+    </div>
+
     <div id="log" class="log"></div>
   </div>
 </div>
@@ -104,7 +166,7 @@
 <div id="reveal-overlay" class="overlay" style="display:none;">
   <div class="reveal-box">
     <div class="reveal-title" id="reveal-title">LIAR CALLED!</div>
-    <div class="reveal-cards" id="reveal-cards"></div>
+    <div id="reveal-body"></div>
     <div class="reveal-verdict" id="reveal-verdict"></div>
   </div>
 </div>
