@@ -39,8 +39,10 @@ function shuffle(arr) {
   return a;
 }
 
-function addLog(room, msg) {
-  room.log.push({ time: Date.now(), msg });
+function addLog(room, msg, type = 'info', data = null) {
+  const entry = { time: Date.now(), msg, type };
+  if (data) entry.data = data;
+  room.log.push(entry);
   if (room.log.length > 200) room.log.shift();
 }
 
@@ -127,10 +129,10 @@ function performShot(room, loserId, callerId, accusedId) {
 
     if (isBullet) {
       loser.alive = false;
-      addLog(room, `💥 BANG. ${loser.name} is out.`);
+      addLog(room, `${loser.name} is dead.`, 'dead', { player: loser.name });
     } else {
       const left = loser.chambers - loser.shotsFired;
-      addLog(room, `*click* — ${loser.name} survives (${left} chamber${left === 1 ? '' : 's'} left).`);
+      addLog(room, `${loser.name} survives — ${left} chamber${left === 1 ? '' : 's'} left.`, 'survive', { player: loser.name, chambersLeft: left });
     }
 
     io.to(room.code).emit('shot', {
@@ -158,7 +160,7 @@ function performShot(room, loserId, callerId, accusedId) {
       const survivors = room.players.filter(p => p.alive);
       if (survivors.length <= 1) {
         room.state = 'finished';
-        if (survivors.length === 1) addLog(room, `🏆 ${survivors[0].name} wins the bar!`);
+        if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win', { player: survivors[0].name });
         broadcastRoom(room);
         return;
       }
@@ -198,7 +200,8 @@ const cardsGame = {
     const survivors = room.players.filter(p => p.alive);
     if (survivors.length <= 1) {
       room.state = 'finished';
-      addLog(room, survivors.length === 1 ? `${survivors[0].name} wins the bar!` : 'No survivors.');
+      if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win');
+      else addLog(room, 'No survivors.', 'system');
       broadcastRoom(room);
       return;
     }
@@ -216,8 +219,9 @@ const cardsGame = {
     if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
       room.currentPlayerIdx = pickRandomAlive(room);
     }
-    addLog(room, `── Round ${room.roundNumber} ── Table card: ${room.tableCard}.`);
-    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`);
+    addLog(room, `Round ${room.roundNumber}`, 'round');
+    addLog(room, `Table card: ${room.tableCard}`, 'round-info', { tableCard: room.tableCard });
+    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`, 'turn');
     broadcastRoom(room);
   },
   handlePlay(room, socket, { indices }) {
@@ -234,7 +238,7 @@ const cardsGame = {
     const played = uniq.map(i => player.hand.splice(i, 1)[0]);
     room.lastPlayedCards = played;
     room.lastActorIdx = playerIdx;
-    addLog(room, `${player.name} plays ${played.length} card${played.length > 1 ? 's' : ''} as ${room.tableCard}${played.length > 1 ? 's' : ''}.`);
+    addLog(room, `${player.name} plays ${played.length} card${played.length > 1 ? 's' : ''} as ${room.tableCard}${played.length > 1 ? 's' : ''}.`, 'play', { player: player.name, mode: 'cards', count: played.length, tableCard: room.tableCard });
     room.currentPlayerIdx = nextAlivePlayer(room, playerIdx);
     broadcastRoom(room);
   },
@@ -251,9 +255,9 @@ const cardsGame = {
     const allMatch = cards.every(c => c === tableCard || c === 'Joker');
     const loser = allMatch ? caller : accused;
 
-    addLog(room, `${caller.name} calls LIAR on ${accused.name}!`);
-    addLog(room, `Cards: ${cards.join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`);
-    addLog(room, `${loser.name} pulls the trigger…`);
+    addLog(room, `${caller.name} calls LIAR on ${accused.name}!`, 'liar', { caller: caller.name, accused: accused.name });
+    addLog(room, `Cards: ${cards.join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`, allMatch ? 'verdict-truth' : 'verdict-lie');
+    addLog(room, `${loser.name} pulls the trigger…`, 'tension');
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {
@@ -286,7 +290,7 @@ const diceGame = {
     const survivors = room.players.filter(p => p.alive);
     if (survivors.length <= 1) {
       room.state = 'finished';
-      if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`);
+      if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win');
       broadcastRoom(room);
       return;
     }
@@ -299,7 +303,9 @@ const diceGame = {
     if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
       room.currentPlayerIdx = pickRandomAlive(room);
     }
-    addLog(room, `── Round ${room.roundNumber} ── Dice rolled. ${room.players[room.currentPlayerIdx].name} starts the bidding.`);
+    addLog(room, `Round ${room.roundNumber}`, 'round');
+    addLog(room, 'Dice rolled.', 'round-info', { event: 'dice-rolled' });
+    addLog(room, `${room.players[room.currentPlayerIdx].name} starts the bidding.`, 'turn');
     broadcastRoom(room);
   },
   handlePlay(room, socket, { qty, face }) {
@@ -323,7 +329,7 @@ const diceGame = {
 
     room.lastBid = { qty, face, playerIdx };
     room.lastActorIdx = playerIdx;
-    addLog(room, `${player.name} bids ${qty} × ${face}${face === 1 ? ' (wild)' : ''}.`);
+    addLog(room, `${player.name} bids ${qty} × ${face}${face === 1 ? ' (wild)' : ''}.`, 'play', { player: player.name, mode: 'dice', qty, face });
     room.currentPlayerIdx = nextAlivePlayer(room, playerIdx);
     broadcastRoom(room);
   },
@@ -350,9 +356,9 @@ const diceGame = {
     const bidMet = count >= qty;
     const loser = bidMet ? caller : bidder;
 
-    addLog(room, `${caller.name} calls LIAR on ${bidder.name}!`);
-    addLog(room, `Bid: ${qty} × ${face}. Actual: ${count}. ${bidMet ? 'Bid stands!' : 'Bid busts!'}`);
-    addLog(room, `${loser.name} pulls the trigger…`);
+    addLog(room, `${caller.name} calls LIAR on ${bidder.name}!`, 'liar', { caller: caller.name, accused: bidder.name });
+    addLog(room, `Bid ${qty} × ${face} — found ${count}. ${bidMet ? 'Bid stands!' : 'Bid busts!'}`, bidMet ? 'verdict-truth' : 'verdict-lie', { mode: 'dice', qty, face, count });
+    addLog(room, `${loser.name} pulls the trigger…`, 'tension');
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {
@@ -483,7 +489,7 @@ const pokerGame = {
     const survivors = room.players.filter(p => p.alive);
     if (survivors.length <= 1) {
       room.state = 'finished';
-      if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`);
+      if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win');
       broadcastRoom(room);
       return;
     }
@@ -501,7 +507,9 @@ const pokerGame = {
     if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
       room.currentPlayerIdx = pickRandomAlive(room);
     }
-    addLog(room, `── Round ${room.roundNumber} ── Hands dealt. ${room.players[room.currentPlayerIdx].name} declares first.`);
+    addLog(room, `Round ${room.roundNumber}`, 'round');
+    addLog(room, 'Hands dealt.', 'round-info', { event: 'hands-dealt' });
+    addLog(room, `${room.players[room.currentPlayerIdx].name} declares first.`, 'turn');
     broadcastRoom(room);
   },
   handlePlay(room, socket, { type, rank }) {
@@ -524,7 +532,7 @@ const pokerGame = {
     }
     room.lastDeclaration = { type, rank, playerIdx };
     room.lastActorIdx = playerIdx;
-    addLog(room, `${player.name} declares ${formatDeclaration(type, rank)}.`);
+    addLog(room, `${player.name} declares ${formatDeclaration(type, rank)}.`, 'play', { player: player.name, mode: 'poker', declaration: formatDeclaration(type, rank) });
     room.currentPlayerIdx = nextAlivePlayer(room, playerIdx);
     broadcastRoom(room);
   },
@@ -547,9 +555,9 @@ const pokerGame = {
     const exists = checkHandExists(pool, type, rank);
     const loser = exists ? caller : declarer;
 
-    addLog(room, `${caller.name} calls LIAR on ${declarer.name}!`);
-    addLog(room, `${formatDeclaration(type, rank)} — ${exists ? 'found in pool (truth).' : 'not in pool (lie).'}`);
-    addLog(room, `${loser.name} pulls the trigger…`);
+    addLog(room, `${caller.name} calls LIAR on ${declarer.name}!`, 'liar', { caller: caller.name, accused: declarer.name });
+    addLog(room, `${formatDeclaration(type, rank)} — ${exists ? 'found in pool.' : 'not in the pool.'}`, exists ? 'verdict-truth' : 'verdict-lie');
+    addLog(room, `${loser.name} pulls the trigger…`, 'tension');
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {
@@ -580,7 +588,7 @@ io.on('connection', (socket) => {
       bulletPos: Math.floor(Math.random() * 6),
       hand: [], dice: [],
     });
-    addLog(room, `${name} entered the bar.`);
+    addLog(room, `${name} entered the bar.`, 'system');
   }
 
   socket.on('createRoom', ({ name }) => {
@@ -621,7 +629,7 @@ io.on('connection', (socket) => {
     if (room.gameMode === mode) return;
     room.gameMode = mode;
     const labels = { cards: "Liar's Cards", dice: "Liar's Dice", poker: 'Bluff Poker' };
-    addLog(room, `Mode set to ${labels[mode]}.`);
+    addLog(room, `Mode set to ${labels[mode]}.`, 'system');
     broadcastRoom(room);
   });
 
@@ -638,7 +646,7 @@ io.on('connection', (socket) => {
       p.bulletPos = Math.floor(Math.random() * 6);
     }
     const labels = { cards: "Liar's Cards", dice: "Liar's Dice", poker: 'Bluff Poker' };
-    addLog(room, `─── ${labels[room.gameMode]} — game start ───`);
+    addLog(room, `${labels[room.gameMode]} — game start`, 'event');
     games[room.gameMode].init(room);
     games[room.gameMode].startRound(room);
   });
@@ -661,7 +669,7 @@ io.on('connection', (socket) => {
     room.currentPlayerIdx = null;
     room.lastActorIdx = null;
     room.roundNumber = 0;
-    addLog(room, 'Back to lobby.');
+    addLog(room, 'Back to lobby.', 'system');
     broadcastRoom(room);
   });
 
@@ -686,7 +694,7 @@ io.on('connection', (socket) => {
 
     if (room.state === 'lobby' || room.state === 'finished') {
       room.players.splice(idx, 1);
-      addLog(room, `${player.name} left.`);
+      addLog(room, `${player.name} left.`, 'system');
       if (room.players.length === 0) {
         rooms.delete(room.code);
         currentRoomCode = null;
@@ -694,17 +702,17 @@ io.on('connection', (socket) => {
       }
       if (room.hostId === socket.id) {
         room.hostId = room.players[0].id;
-        addLog(room, `${room.players[0].name} is now the host.`);
+        addLog(room, `${room.players[0].name} is now the host.`, 'system');
       }
       broadcastRoom(room);
     } else {
       player.disconnected = true;
       player.alive = false;
-      addLog(room, `${player.name} disconnected.`);
+      addLog(room, `${player.name} disconnected.`, 'system');
       const survivors = room.players.filter(p => p.alive);
       if (survivors.length <= 1) {
         room.state = 'finished';
-        if (survivors.length === 1) addLog(room, `🏆 ${survivors[0].name} wins!`);
+        if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win');
       } else if (idx === room.currentPlayerIdx) {
         room.currentPlayerIdx = nextAlivePlayer(room, idx);
       }

@@ -567,15 +567,174 @@ function renderPokerMode() {
   updatePokerButtons();
 }
 
+let _lastLogTime = 0;
 function renderLog() {
   const log = $('log');
   log.innerHTML = '';
-  for (const entry of state.log.slice(-20)) {
-    const div = document.createElement('div');
-    div.textContent = entry.msg;
-    log.appendChild(div);
+  const entries = state.log.slice(-25);
+
+  for (const entry of entries) {
+    const el = makeLogEntry(entry);
+    if (entry.time > _lastLogTime) el.classList.add('fresh');
+    log.appendChild(el);
   }
-  log.scrollTop = log.scrollHeight;
+  _lastLogTime = entries.length ? entries[entries.length - 1].time : _lastLogTime;
+  requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
+}
+
+function makeLogEntry(entry) {
+  const div = document.createElement('div');
+  div.className = `log-entry log-${entry.type}`;
+  const data = entry.data || {};
+
+  switch (entry.type) {
+    case 'round': {
+      div.innerHTML = `<span class="log-round-text">${escapeHtml(entry.msg)}</span>`;
+      break;
+    }
+    case 'round-info': {
+      const inner = document.createElement('div');
+      inner.className = 'log-round-info';
+      if (data.tableCard) {
+        const lbl = document.createElement('span');
+        lbl.className = 'log-label';
+        lbl.textContent = 'Table card';
+        inner.appendChild(lbl);
+        const val = document.createElement('span');
+        val.className = `log-tablecard tc-${data.tableCard.toLowerCase()}`;
+        val.textContent = data.tableCard;
+        inner.appendChild(val);
+      } else {
+        inner.textContent = entry.msg;
+      }
+      div.appendChild(inner);
+      break;
+    }
+    case 'event': {
+      div.innerHTML = `<span class="log-event-text">${escapeHtml(entry.msg)}</span>`;
+      break;
+    }
+    case 'turn': {
+      div.innerHTML = `<span class="log-icon">▸</span> <span class="log-turn-text">${escapeHtml(entry.msg)}</span>`;
+      break;
+    }
+    case 'play': {
+      const ico = document.createElement('span');
+      ico.className = 'log-icon';
+      ico.textContent = data.mode === 'dice' ? '🎲' : (data.mode === 'poker' ? '♠' : '🂠');
+      div.appendChild(ico);
+      const pn = document.createElement('span');
+      pn.className = 'log-player';
+      pn.textContent = data.player || '';
+      div.appendChild(pn);
+      const body = document.createElement('span');
+      body.className = 'log-body';
+      if (data.mode === 'dice') {
+        body.innerHTML = ' bids ';
+        const qty = document.createElement('span');
+        qty.className = 'log-num';
+        qty.textContent = data.qty;
+        body.appendChild(qty);
+        body.appendChild(document.createTextNode(' × '));
+        body.appendChild(makeDie(data.face));
+        if (data.face === 1) {
+          const w = document.createElement('span');
+          w.className = 'log-wild';
+          w.textContent = 'WILD';
+          body.appendChild(w);
+        }
+      } else if (data.mode === 'cards') {
+        body.innerHTML = ` plays <span class="log-num">${data.count}</span> as `;
+        const tc = document.createElement('span');
+        tc.className = `log-tablecard tc-${(data.tableCard || '').toLowerCase()}`;
+        tc.textContent = data.tableCard + (data.count > 1 ? 's' : '');
+        body.appendChild(tc);
+      } else if (data.mode === 'poker') {
+        body.innerHTML = ` declares <span class="log-decl">${escapeHtml(data.declaration)}</span>`;
+      } else {
+        body.textContent = ' ' + (entry.msg.split(' ').slice(1).join(' '));
+      }
+      div.appendChild(body);
+      break;
+    }
+    case 'liar': {
+      const ico = document.createElement('span');
+      ico.className = 'log-icon liar-bolt';
+      ico.textContent = '⚡';
+      div.appendChild(ico);
+      const caller = document.createElement('span');
+      caller.className = 'log-player';
+      caller.textContent = data.caller || '';
+      div.appendChild(caller);
+      const middle = document.createElement('span');
+      middle.className = 'log-liar-text';
+      middle.textContent = ' calls LIAR on ';
+      div.appendChild(middle);
+      const accused = document.createElement('span');
+      accused.className = 'log-player';
+      accused.textContent = data.accused || '';
+      div.appendChild(accused);
+      div.appendChild(document.createTextNode('!'));
+      break;
+    }
+    case 'verdict-truth':
+    case 'verdict-lie': {
+      const tag = document.createElement('span');
+      tag.className = 'log-verdict-tag ' + (entry.type === 'verdict-truth' ? 'truth' : 'lie');
+      tag.textContent = entry.type === 'verdict-truth' ? 'TRUTH' : 'LIE';
+      div.appendChild(tag);
+      const body = document.createElement('span');
+      body.className = 'log-body';
+      body.textContent = ' ' + entry.msg;
+      div.appendChild(body);
+      break;
+    }
+    case 'tension': {
+      div.innerHTML = `<span class="log-icon">🔫</span> <span class="log-tension-text">${escapeHtml(entry.msg)}</span>`;
+      break;
+    }
+    case 'dead': {
+      const ico = document.createElement('span');
+      ico.className = 'log-icon log-bang-icon';
+      ico.textContent = '💥';
+      div.appendChild(ico);
+      const text = document.createElement('span');
+      text.className = 'log-bang-text';
+      text.innerHTML = `BANG — <span class="log-player">${escapeHtml(data.player || '')}</span> is dead.`;
+      div.appendChild(text);
+      break;
+    }
+    case 'survive': {
+      const ico = document.createElement('span');
+      ico.className = 'log-icon';
+      ico.textContent = '•';
+      div.appendChild(ico);
+      const text = document.createElement('span');
+      text.className = 'log-survive-text';
+      text.innerHTML = `<i>click</i> — <span class="log-player">${escapeHtml(data.player || '')}</span> survives. <span class="log-chambers-left">${data.chambersLeft || 0} left</span>`;
+      div.appendChild(text);
+      break;
+    }
+    case 'win': {
+      const ico = document.createElement('span');
+      ico.className = 'log-icon log-trophy';
+      ico.textContent = '🏆';
+      div.appendChild(ico);
+      const text = document.createElement('span');
+      text.className = 'log-win-text';
+      text.innerHTML = `<span class="log-player">${escapeHtml(data.player || '')}</span> wins the bar!`;
+      div.appendChild(text);
+      break;
+    }
+    case 'system':
+    default: {
+      const text = document.createElement('span');
+      text.className = 'log-system-text';
+      text.textContent = entry.msg;
+      div.appendChild(text);
+    }
+  }
+  return div;
 }
 
 function renderGameOver() {

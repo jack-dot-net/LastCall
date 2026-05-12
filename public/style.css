@@ -435,19 +435,380 @@ button.small { font-size: 0.85rem; padding: 0.4rem 0.8rem; }
 }
 #actions button { min-width: 160px; padding: 0.8rem 1.5rem; font-size: 1rem; }
 
-.log {
-  background: rgba(0, 0, 0, 0.6);
+/* ───────────── BAR TAB (LOG) ───────────── */
+.bar-tab {
+  background:
+    linear-gradient(180deg, rgba(45, 24, 16, 0.95), rgba(20, 10, 5, 0.98)),
+    repeating-linear-gradient(45deg, transparent 0 4px, rgba(107, 68, 35, 0.04) 4px 5px);
   border: 1px solid var(--wood);
   border-radius: 6px;
-  padding: 0.6rem 0.8rem;
-  max-height: 160px;
-  overflow-y: auto;
-  font-size: 0.85rem;
-  font-family: 'Courier New', monospace;
-  line-height: 1.5;
+  box-shadow:
+    inset 0 1px 0 rgba(200, 148, 86, 0.18),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.55),
+    0 4px 14px rgba(0, 0, 0, 0.4);
+  position: relative;
+  margin-bottom: 0.4rem;
 }
-.log div { margin-bottom: 2px; color: var(--cream); opacity: 0.9; }
-.log div:last-child { color: var(--gold-bright); opacity: 1; }
+.bar-tab::before, .bar-tab::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  pointer-events: none;
+}
+.bar-tab::before {
+  top: 4px;
+  background: linear-gradient(90deg, transparent, rgba(200, 148, 86, 0.35), transparent);
+}
+.bar-tab::after {
+  bottom: 4px;
+  background: linear-gradient(90deg, transparent, rgba(200, 148, 86, 0.25), transparent);
+}
+
+.bar-tab-header {
+  text-align: center;
+  padding: 0.55rem 0.8rem 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  border-bottom: 1px solid rgba(107, 68, 35, 0.5);
+  background: linear-gradient(180deg, rgba(107, 68, 35, 0.15), transparent);
+}
+.bt-title {
+  font-size: 0.85rem;
+  font-variant: small-caps;
+  letter-spacing: 0.32em;
+  color: var(--gold);
+  font-weight: bold;
+  text-shadow: 0 1px 0 #000;
+}
+.bt-flourish {
+  color: var(--gold);
+  opacity: 0.55;
+  font-size: 0.95rem;
+}
+
+.log {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.5rem 0.8rem;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wood) transparent;
+}
+.log::-webkit-scrollbar { width: 6px; }
+.log::-webkit-scrollbar-track { background: transparent; }
+.log::-webkit-scrollbar-thumb { background: var(--wood); border-radius: 3px; }
+
+@keyframes logEntryIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.log-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.18rem 0.1rem;
+  color: var(--cream);
+  animation: logEntryIn 0.35s ease-out;
+  flex-wrap: wrap;
+}
+.log-entry.fresh { animation: logEntryIn 0.5s ease-out; }
+
+/* === System (joins, leaves, mode changes) === */
+.log-system .log-system-text {
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--wood-light);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+}
+.log-system { padding-left: 0.4rem; }
+.log-system::before {
+  content: '›';
+  color: var(--wood);
+  margin-right: 0.3rem;
+  opacity: 0.6;
+}
+
+/* === Round divider === */
+.log-round {
+  margin: 0.7rem 0 0.3rem;
+  padding: 0.2rem 0;
+  justify-content: center;
+  align-items: center;
+}
+.log-round::before, .log-round::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(200, 148, 86, 0.7), transparent);
+  margin: 0 0.7rem;
+}
+.log-round-text {
+  font-size: 0.95rem;
+  font-variant: small-caps;
+  letter-spacing: 0.25em;
+  color: var(--gold-bright);
+  font-weight: bold;
+  text-shadow: 0 0 12px rgba(255, 215, 0, 0.45);
+  white-space: nowrap;
+}
+.log-round::before { background: linear-gradient(90deg, transparent, rgba(255, 215, 0, 0.6) 60%, rgba(255, 215, 0, 0.85)); }
+.log-round::after { background: linear-gradient(90deg, rgba(255, 215, 0, 0.85), rgba(255, 215, 0, 0.6) 40%, transparent); }
+
+/* === Round info (table card, dice rolled, etc.) === */
+.log-round-info {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  justify-content: center;
+  width: 100%;
+  font-size: 0.85rem;
+  color: var(--wood-light);
+  margin-bottom: 0.3rem;
+}
+.log-label {
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+.log-tablecard {
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  font-weight: bold;
+  padding: 0.08rem 0.45rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  border: 1px solid;
+}
+.log-tablecard.tc-king { color: #d4b890; border-color: #d4b890; background: rgba(212, 184, 144, 0.08); }
+.log-tablecard.tc-queen { color: #d4a8a8; border-color: #d4a8a8; background: rgba(212, 168, 168, 0.08); }
+.log-tablecard.tc-ace { color: #a8c8d4; border-color: #a8c8d4; background: rgba(168, 200, 212, 0.08); }
+
+/* === Event (game start) === */
+.log-event {
+  justify-content: center;
+  margin: 0.4rem 0 0.2rem;
+}
+.log-event-text {
+  color: var(--gold);
+  font-size: 0.9rem;
+  font-variant: small-caps;
+  letter-spacing: 0.2em;
+  font-style: italic;
+}
+
+/* === Turn (X starts) === */
+.log-turn .log-turn-text {
+  color: var(--cream);
+  font-style: italic;
+  opacity: 0.85;
+}
+.log-turn .log-icon { color: var(--gold); }
+
+/* === Player actions (play, bid, declare) === */
+.log-play {
+  padding: 0.22rem 0.1rem;
+}
+.log-play .log-icon {
+  font-size: 0.95rem;
+  color: var(--gold);
+  opacity: 0.85;
+}
+.log-player {
+  color: var(--gold-bright);
+  font-weight: bold;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 8px rgba(255, 215, 0, 0.15);
+}
+.log-body {
+  color: var(--cream);
+}
+.log-num {
+  color: var(--gold-bright);
+  font-weight: bold;
+  font-size: 1.05em;
+}
+.log-decl {
+  color: var(--gold);
+  font-style: italic;
+  font-weight: bold;
+}
+.log-play .die {
+  width: 22px;
+  height: 22px;
+  padding: 2px;
+  vertical-align: middle;
+  display: inline-grid;
+  flex-shrink: 0;
+}
+.log-play .die .pip { width: 3px; height: 3px; }
+.log-wild {
+  font-size: 0.6rem;
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  padding: 1px 4px;
+  border-radius: 2px;
+  margin-left: 4px;
+  letter-spacing: 0.08em;
+  vertical-align: middle;
+}
+
+/* === LIAR call === */
+.log-liar {
+  background: linear-gradient(90deg, rgba(139, 26, 26, 0.18), rgba(139, 26, 26, 0.04));
+  border-left: 3px solid var(--red-bright);
+  padding: 0.35rem 0.5rem;
+  margin: 0.25rem 0;
+  border-radius: 0 3px 3px 0;
+}
+.log-liar .log-liar-text {
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+  color: #ff7878;
+  font-weight: bold;
+}
+.liar-bolt {
+  color: var(--red-bright);
+  font-size: 1.1rem;
+  filter: drop-shadow(0 0 4px rgba(255, 60, 60, 0.6));
+  animation: liarPulse 0.7s ease-out;
+}
+@keyframes liarPulse {
+  0% { transform: scale(0.6); opacity: 0; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* === Verdict === */
+.log-verdict-truth, .log-verdict-lie {
+  padding-left: 0.3rem;
+  font-size: 0.88rem;
+}
+.log-verdict-tag {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: bold;
+  letter-spacing: 0.18em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 2px;
+  border: 1px solid;
+  font-variant: small-caps;
+  margin-right: 0.2rem;
+}
+.log-verdict-tag.truth {
+  color: #a8d9a8;
+  border-color: #4a8a4a;
+  background: rgba(74, 138, 74, 0.15);
+}
+.log-verdict-tag.lie {
+  color: #ff9090;
+  border-color: var(--red-bright);
+  background: rgba(192, 32, 32, 0.15);
+}
+.log-verdict-truth .log-body, .log-verdict-lie .log-body {
+  color: var(--cream);
+  opacity: 0.95;
+}
+
+/* === Tension (pulls trigger) === */
+.log-tension {
+  padding-left: 0.3rem;
+}
+.log-tension .log-tension-text {
+  font-style: italic;
+  color: #d4a8a8;
+  letter-spacing: 0.03em;
+}
+.log-tension .log-icon {
+  font-size: 0.9rem;
+  filter: grayscale(0.3);
+}
+
+/* === Dead (BANG) === */
+.log-dead {
+  background: linear-gradient(90deg, rgba(192, 32, 32, 0.28), rgba(192, 32, 32, 0.04));
+  border-left: 3px solid var(--red-bright);
+  padding: 0.4rem 0.5rem;
+  margin: 0.25rem 0;
+  border-radius: 0 3px 3px 0;
+  animation: bangFlash 0.6s ease-out, logEntryIn 0.35s ease-out;
+}
+@keyframes bangFlash {
+  0% { background: rgba(255, 60, 60, 0.6); }
+  100% { background: linear-gradient(90deg, rgba(192, 32, 32, 0.28), rgba(192, 32, 32, 0.04)); }
+}
+.log-bang-icon {
+  font-size: 1.2rem;
+  filter: drop-shadow(0 0 6px rgba(255, 80, 0, 0.7));
+}
+.log-bang-text {
+  font-variant: small-caps;
+  letter-spacing: 0.15em;
+  font-weight: bold;
+  color: #ff8080;
+  font-size: 0.95rem;
+}
+.log-dead .log-player { color: #ffd0d0; }
+
+/* === Survive (click) === */
+.log-survive {
+  padding-left: 0.3rem;
+  color: var(--cream);
+  opacity: 0.92;
+}
+.log-survive .log-icon {
+  color: var(--gold);
+  opacity: 0.7;
+}
+.log-survive-text { color: var(--cream); }
+.log-survive-text i { color: var(--gold); font-style: italic; }
+.log-chambers-left {
+  font-size: 0.75rem;
+  color: var(--wood-light);
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+  margin-left: 0.3rem;
+  font-style: italic;
+}
+
+/* === Win === */
+.log-win {
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(255, 215, 0, 0.18), transparent 70%);
+  padding: 0.6rem 0.5rem;
+  margin: 0.5rem 0 0.2rem;
+  animation: winGlow 1.5s ease-out infinite alternate, logEntryIn 0.35s ease-out;
+}
+@keyframes winGlow {
+  from { box-shadow: inset 0 0 20px rgba(255, 215, 0, 0.15); }
+  to { box-shadow: inset 0 0 30px rgba(255, 215, 0, 0.35); }
+}
+.log-trophy {
+  font-size: 1.3rem;
+  filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.6));
+}
+.log-win-text {
+  font-variant: small-caps;
+  letter-spacing: 0.18em;
+  font-weight: bold;
+  color: var(--gold-bright);
+  font-size: 1rem;
+  text-shadow: 0 0 12px rgba(255, 215, 0, 0.5);
+}
+.log-win .log-player { color: var(--gold-bright); }
+
+/* === Generic log icon === */
+.log-icon {
+  display: inline-block;
+  flex-shrink: 0;
+}
 
 /* ───────────── OVERLAYS ───────────── */
 .overlay {
@@ -1088,6 +1449,15 @@ button.small { font-size: 0.85rem; padding: 0.4rem 0.8rem; }
   .player-count { font-size: 0.9rem; margin-bottom: 0.2rem; }
   .decl-control select { font-size: 0.85rem; padding: 0.4rem 0.5rem; }
   .reveal-dice-grid, .reveal-hands-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+
+  .log { max-height: 130px; font-size: 0.82rem; padding: 0.4rem 0.5rem; }
+  .bar-tab-header { padding: 0.4rem 0.5rem 0.25rem; }
+  .bt-title { font-size: 0.72rem; letter-spacing: 0.25em; }
+  .log-round-text { font-size: 0.82rem; letter-spacing: 0.2em; }
+  .log-bang-text { font-size: 0.85rem; }
+  .log-win-text { font-size: 0.88rem; }
+  .log-play .die { width: 18px; height: 18px; padding: 1.5px; }
+  .log-play .die .pip { width: 2.5px; height: 2.5px; }
 
   .reveal-box { padding: 1.5rem 1rem; }
   .reveal-title { font-size: 1.4rem; }
