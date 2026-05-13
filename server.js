@@ -220,9 +220,9 @@ const cardsGame = {
     if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
       room.currentPlayerIdx = pickRandomAlive(room);
     }
-    addLog(room, `Round ${room.roundNumber}`, 'round');
-    addLog(room, `Table card: ${room.tableCard}`, 'round-info', { tableCard: room.tableCard });
-    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`, 'turn');
+    addLog(room, `Round ${room.roundNumber}`, 'round', { round: room.roundNumber });
+    addLog(room, `Table card: ${room.tableCard}`, 'round-info', { mode: 'cards', tableCard: room.tableCard });
+    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`, 'turn', { player: room.players[room.currentPlayerIdx].name });
     broadcastRoom(room);
   },
   handlePlay(room, socket, { indices }) {
@@ -257,8 +257,8 @@ const cardsGame = {
     const loser = allMatch ? caller : accused;
 
     addLog(room, `${caller.name} calls LIAR on ${accused.name}!`, 'liar', { caller: caller.name, accused: accused.name });
-    addLog(room, `Cards: ${cards.join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`, allMatch ? 'verdict-truth' : 'verdict-lie');
-    addLog(room, `${loser.name} pulls the trigger…`, 'tension');
+    addLog(room, `Cards: ${cards.join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`, allMatch ? 'verdict-truth' : 'verdict-lie', { mode: 'cards', cards, tableCard });
+    addLog(room, `${loser.name} pulls the trigger…`, 'tension', { player: loser.name });
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {
@@ -304,9 +304,9 @@ const diceGame = {
     if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
       room.currentPlayerIdx = pickRandomAlive(room);
     }
-    addLog(room, `Round ${room.roundNumber}`, 'round');
-    addLog(room, 'Dice rolled.', 'round-info', { event: 'dice-rolled' });
-    addLog(room, `${room.players[room.currentPlayerIdx].name} starts the bidding.`, 'turn');
+    addLog(room, `Round ${room.roundNumber}`, 'round', { round: room.roundNumber });
+    addLog(room, 'Dice rolled.', 'round-info', { mode: 'dice', event: 'dice-rolled' });
+    addLog(room, `${room.players[room.currentPlayerIdx].name} starts the bidding.`, 'turn', { player: room.players[room.currentPlayerIdx].name });
     broadcastRoom(room);
   },
   handlePlay(room, socket, { qty, face }) {
@@ -359,7 +359,7 @@ const diceGame = {
 
     addLog(room, `${caller.name} calls LIAR on ${bidder.name}!`, 'liar', { caller: caller.name, accused: bidder.name });
     addLog(room, `Bid ${qty} × ${face} — found ${count}. ${bidMet ? 'Bid stands!' : 'Bid busts!'}`, bidMet ? 'verdict-truth' : 'verdict-lie', { mode: 'dice', qty, face, count });
-    addLog(room, `${loser.name} pulls the trigger…`, 'tension');
+    addLog(room, `${loser.name} pulls the trigger…`, 'tension', { player: loser.name });
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {
@@ -393,8 +393,8 @@ const diceGame = {
     const loser = exact ? bidder : caller;
 
     addLog(room, `${caller.name} calls SPOT ON on ${bidder.name}!`, 'spoton', { caller: caller.name, accused: bidder.name });
-    addLog(room, `Bid ${qty} × ${face} — found ${count}. ${exact ? 'SPOT ON!' : 'Off — missed by ' + Math.abs(count - qty) + '.'}`, exact ? 'verdict-truth' : 'verdict-lie', { mode: 'dice', qty, face, count });
-    addLog(room, `${loser.name} pulls the trigger…`, 'tension');
+    addLog(room, `Bid ${qty} × ${face} — found ${count}. ${exact ? 'SPOT ON!' : 'Off — missed by ' + Math.abs(count - qty) + '.'}`, exact ? 'verdict-truth' : 'verdict-lie', { mode: 'dice', qty, face, count, spoton: true });
+    addLog(room, `${loser.name} pulls the trigger…`, 'tension', { player: loser.name });
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {
@@ -466,9 +466,9 @@ const pokerGame = {
     if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
       room.currentPlayerIdx = pickRandomAlive(room);
     }
-    addLog(room, `Round ${room.roundNumber}`, 'round');
-    addLog(room, `Target rank: ${rankName(room.targetRank)}`, 'round-info', { targetRank: room.targetRank });
-    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`, 'turn');
+    addLog(room, `Round ${room.roundNumber}`, 'round', { round: room.roundNumber });
+    addLog(room, `Target rank: ${rankName(room.targetRank)}`, 'round-info', { mode: 'poker', targetRank: room.targetRank });
+    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`, 'turn', { player: room.players[room.currentPlayerIdx].name });
     broadcastRoom(room);
   },
   handlePlay(room, socket, { indices }) {
@@ -504,8 +504,8 @@ const pokerGame = {
     const loser = allMatch ? caller : accused;
 
     addLog(room, `${caller.name} calls LIAR on ${accused.name}!`, 'liar', { caller: caller.name, accused: accused.name });
-    addLog(room, `Cards: ${cards.map(pokerCardLabel).join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`, allMatch ? 'verdict-truth' : 'verdict-lie');
-    addLog(room, `${loser.name} pulls the trigger…`, 'tension');
+    addLog(room, `Cards: ${cards.map(pokerCardLabel).join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`, allMatch ? 'verdict-truth' : 'verdict-lie', { mode: 'poker', cards, targetRank: target });
+    addLog(room, `${loser.name} pulls the trigger…`, 'tension', { player: loser.name });
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {

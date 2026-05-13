@@ -854,6 +854,299 @@ button.small { font-size: 0.85rem; padding: 0.4rem 0.8rem; }
   flex-shrink: 0;
 }
 
+/* ───────────── BAR TAB MINI-SPRITES ───────────── */
+.log-entry { align-items: center; }
+.log-entry .die {
+  width: 22px;
+  height: 22px;
+  padding: 2px;
+  display: inline-grid;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.log-entry .die .pip { width: 3px; height: 3px; }
+
+/* Player chip */
+.player-chip {
+  display: inline-block;
+  font-size: 0.82rem;
+  font-weight: bold;
+  color: var(--gold-bright);
+  background: rgba(200, 148, 86, 0.12);
+  border: 1px solid var(--gold);
+  padding: 0.08rem 0.55rem;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  vertical-align: middle;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.player-chip.log-player-caller {
+  color: #9adcef;
+  border-color: #6a9aba;
+  background: rgba(106, 154, 186, 0.18);
+}
+.player-chip.log-player-accused {
+  color: #ff9090;
+  border-color: var(--red-bright);
+  background: rgba(192, 32, 32, 0.18);
+}
+.player-chip.log-player-dead {
+  color: #999;
+  border-color: #555;
+  background: rgba(40, 40, 40, 0.4);
+  text-decoration: line-through;
+}
+.player-chip.log-player-winner {
+  color: var(--gold-bright);
+  border-color: var(--gold-bright);
+  background: rgba(255, 215, 0, 0.22);
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.45);
+}
+
+/* Mini face-down card */
+.mini-card-back {
+  display: inline-block;
+  width: 16px;
+  height: 22px;
+  background: linear-gradient(180deg, #6b1818 0%, #3a0a0a 100%);
+  border: 1.5px solid var(--gold);
+  border-radius: 2px;
+  vertical-align: middle;
+  position: relative;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 200, 120, 0.15);
+}
+.mini-card-back::after {
+  content: '♛';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--gold);
+  opacity: 0.7;
+}
+
+/* Mini Liar's card (face-up) */
+.mini-liars-card {
+  display: inline-block;
+  width: 22px;
+  height: 28px;
+  background: var(--card-bg);
+  border: 1.5px solid var(--bg-dark);
+  border-radius: 3px;
+  text-align: center;
+  font-weight: bold;
+  font-size: 0.95rem;
+  font-family: Georgia, serif;
+  color: var(--bg-dark);
+  line-height: 26px;
+  vertical-align: middle;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.mini-liars-card.mc-king { background: linear-gradient(180deg, #f4e8d0, #d4b890); }
+.mini-liars-card.mc-queen { background: linear-gradient(180deg, #f4d8d8, #d4a8a8); }
+.mini-liars-card.mc-ace { background: linear-gradient(180deg, #d8e8f4, #a8c8d4); }
+.mini-liars-card.mc-joker {
+  background: linear-gradient(180deg, #2d1810, #6b1818);
+  color: var(--gold-bright);
+  border-color: var(--red-bright);
+}
+
+/* Mini poker card */
+.mini-poker-card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 28px;
+  background: var(--card-bg);
+  border: 1.5px solid var(--bg-dark);
+  border-radius: 3px;
+  font-weight: bold;
+  font-family: Georgia, serif;
+  color: var(--bg-dark);
+  vertical-align: middle;
+  line-height: 1;
+  padding: 2px 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.mini-poker-card.suit-h, .mini-poker-card.suit-d { color: #b00; }
+.mini-poker-card .mpc-rank { font-size: 0.55rem; line-height: 1; font-weight: bold; }
+.mini-poker-card .mpc-suit { font-size: 0.85rem; line-height: 1; }
+.mini-poker-card.joker {
+  background: linear-gradient(180deg, #2d1810, #6b1818);
+  color: var(--gold-bright);
+  border-color: var(--red-bright);
+  font-size: 1rem;
+  font-style: italic;
+}
+
+/* Rank chip (poker target) */
+.rank-chip {
+  display: inline-block;
+  font-weight: bold;
+  color: var(--gold-bright);
+  background: rgba(200, 148, 86, 0.14);
+  border: 1px solid var(--gold);
+  padding: 0.08rem 0.45rem;
+  border-radius: 3px;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  font-variant: small-caps;
+  vertical-align: middle;
+}
+
+/* Revolver SVG icon */
+.revolver-icon {
+  display: inline-block;
+  width: 30px;
+  height: 16px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.revolver-icon svg { width: 100%; height: 100%; display: block; }
+.revolver-icon.smoke { filter: drop-shadow(0 0 5px rgba(220, 220, 220, 0.55)); }
+.revolver-icon.fired {
+  filter: drop-shadow(0 0 6px rgba(255, 110, 40, 0.85));
+  animation: revolverRecoil 0.4s ease-out;
+}
+@keyframes revolverRecoil {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(3px) rotate(-3deg); }
+  50% { transform: translateX(-1px); }
+}
+
+/* Chamber row */
+.log-chamber-row {
+  display: inline-flex;
+  gap: 2px;
+  vertical-align: middle;
+  margin-left: 0.25rem;
+}
+.log-chamber-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bg-dark);
+  border: 1px solid var(--gold);
+}
+.log-chamber-dot.fired {
+  background: var(--red);
+  border-color: var(--red-bright);
+}
+
+/* Cards row inside log */
+.log-cards-row {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+  flex-wrap: wrap;
+}
+
+/* Mini text & labels */
+.log-mini-text {
+  font-style: italic;
+  color: var(--wood-light);
+  font-size: 0.82rem;
+}
+.log-mini-label {
+  font-size: 0.7rem;
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  color: var(--wood-light);
+}
+
+/* Round banner */
+.log-round-banner {
+  font-size: 0.95rem;
+  font-variant: small-caps;
+  letter-spacing: 0.25em;
+  color: var(--gold-bright);
+  font-weight: bold;
+  text-shadow: 0 0 12px rgba(255, 215, 0, 0.45);
+  padding: 0.05rem 0.6rem;
+  white-space: nowrap;
+}
+
+/* Event banner */
+.log-event-banner {
+  font-variant: small-caps;
+  letter-spacing: 0.2em;
+  color: var(--gold);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+/* Arrow */
+.log-arrow {
+  color: var(--gold);
+  font-weight: bold;
+  opacity: 0.7;
+  font-size: 1rem;
+}
+
+/* Bid quantities & math */
+.log-qty {
+  color: var(--gold-bright);
+  font-weight: bold;
+  font-size: 1.05em;
+}
+.log-mult {
+  color: var(--wood-light);
+  font-weight: bold;
+}
+.log-eq {
+  color: var(--wood-light);
+  margin: 0 0.1rem;
+}
+
+/* LIAR/SPOT ON center cluster */
+.log-liar-center, .log-spoton-center {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* Tension dots */
+.log-tension-dots {
+  font-size: 1.3rem;
+  color: #d4a8a8;
+  letter-spacing: 0.1em;
+  margin-left: 0.15rem;
+  font-weight: bold;
+  line-height: 1;
+}
+
+/* Click text */
+.log-click-text {
+  font-style: italic;
+  color: var(--gold);
+  font-size: 0.88rem;
+  font-family: 'Courier New', monospace;
+}
+
+/* Dead X */
+.log-dead-x {
+  color: #ff6060;
+  font-weight: bold;
+  font-size: 1.2rem;
+  margin-left: 0.2rem;
+}
+
+/* Verdict body */
+.log-verdict-body {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
 /* ───────────── OVERLAYS ───────────── */
 .overlay {
   position: fixed;

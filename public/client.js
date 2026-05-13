@@ -522,6 +522,70 @@ function renderLog() {
   requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
 }
 
+// --- Mini sprite builders for log entries ---
+function elem(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function makePlayerChip(name, extra = '') {
+  const c = elem('span', 'player-chip ' + extra, name || '');
+  return c;
+}
+
+function makeMiniCardBack() {
+  return elem('span', 'mini-card-back');
+}
+
+function makeMiniLiarsCard(name) {
+  const c = elem('span', `mini-liars-card mc-${(name || '').toLowerCase()}`);
+  c.textContent = name === 'Joker' ? '★' : (name || '?').charAt(0);
+  return c;
+}
+
+function makeMiniPokerCard(card) {
+  if (!card) return elem('span', 'mini-poker-card');
+  if (card.joker) {
+    const c = elem('span', 'mini-poker-card joker', '★');
+    return c;
+  }
+  const c = elem('span', `mini-poker-card suit-${(card.suit || '').toLowerCase()}`);
+  c.innerHTML = `<span class="mpc-rank">${rankName(card.rank)}</span><span class="mpc-suit">${SUITS_POKER[card.suit] || ''}</span>`;
+  return c;
+}
+
+function makeRankChip(rank) {
+  return elem('span', 'rank-chip', rankName(rank) + 's');
+}
+
+function makeRevolverIcon(opts = {}) {
+  const div = elem('span', 'revolver-icon' + (opts.smoke ? ' smoke' : '') + (opts.fired ? ' fired' : ''));
+  div.innerHTML = `<svg viewBox="0 0 32 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="10" y="7.5" width="13" height="2.5" fill="#3a3a3a" stroke="#1a1a1a" stroke-width="0.3"/>
+    <rect x="22.5" y="6.8" width="2.5" height="4" fill="#222"/>
+    <circle cx="6" cy="9" r="4.6" fill="#5a5a5a" stroke="#1a1a1a" stroke-width="0.5"/>
+    <circle cx="6" cy="9" r="3.4" fill="#3a3a3a"/>
+    <circle cx="4.4" cy="7.4" r="0.55" fill="#0a0604"/>
+    <circle cx="7.6" cy="7.4" r="0.55" fill="#0a0604"/>
+    <circle cx="4.4" cy="10.6" r="0.55" fill="#0a0604"/>
+    <circle cx="7.6" cy="10.6" r="0.55" fill="#0a0604"/>
+    <circle cx="6" cy="9" r="0.7" fill="#0a0604"/>
+    <path d="M 4.8 13 L 8.2 13 L 9 16 L 4 16 Z" fill="#6b4423" stroke="#3a2010" stroke-width="0.3"/>
+  </svg>`;
+  return div;
+}
+
+function makeChamberRow(chambersLeft, total = 6) {
+  const row = elem('span', 'log-chamber-row');
+  const fired = total - chambersLeft;
+  for (let i = 0; i < total; i++) {
+    row.appendChild(elem('span', 'log-chamber-dot' + (i < fired ? ' fired' : '')));
+  }
+  return row;
+}
+
 function makeLogEntry(entry) {
   const div = document.createElement('div');
   div.className = `log-entry log-${entry.type}`;
@@ -529,169 +593,133 @@ function makeLogEntry(entry) {
 
   switch (entry.type) {
     case 'round': {
-      div.innerHTML = `<span class="log-round-text">${escapeHtml(entry.msg)}</span>`;
+      const n = data.round || (entry.msg.match(/\d+/) || ['?'])[0];
+      div.appendChild(elem('span', 'log-round-banner', `Round ${n}`));
       break;
     }
     case 'round-info': {
-      const inner = document.createElement('div');
-      inner.className = 'log-round-info';
-      if (data.tableCard) {
-        const lbl = document.createElement('span');
-        lbl.className = 'log-label';
-        lbl.textContent = 'Table card';
-        inner.appendChild(lbl);
-        const val = document.createElement('span');
-        val.className = `log-tablecard tc-${data.tableCard.toLowerCase()}`;
-        val.textContent = data.tableCard;
-        inner.appendChild(val);
+      if (data.mode === 'cards' && data.tableCard) {
+        div.appendChild(elem('span', 'log-mini-label', 'Table card'));
+        div.appendChild(makeMiniLiarsCard(data.tableCard));
+      } else if (data.mode === 'poker' && data.targetRank) {
+        div.appendChild(elem('span', 'log-mini-label', 'Target'));
+        div.appendChild(makeRankChip(data.targetRank));
+      } else if (data.mode === 'dice') {
+        div.appendChild(elem('span', 'log-mini-label', 'Dice rolled'));
+        const tray = elem('span', 'log-cards-row');
+        tray.appendChild(makeDie(2));
+        tray.appendChild(makeDie(5));
+        tray.appendChild(makeDie(3));
+        div.appendChild(tray);
       } else {
-        inner.textContent = entry.msg;
+        div.appendChild(elem('span', 'log-mini-text', entry.msg));
       }
-      div.appendChild(inner);
       break;
     }
     case 'event': {
-      div.innerHTML = `<span class="log-event-text">${escapeHtml(entry.msg)}</span>`;
+      div.appendChild(elem('span', 'log-event-banner', entry.msg));
       break;
     }
     case 'turn': {
-      div.innerHTML = `<span class="log-icon">▸</span> <span class="log-turn-text">${escapeHtml(entry.msg)}</span>`;
+      div.appendChild(makePlayerChip(data.player || ''));
+      div.appendChild(elem('span', 'log-arrow', '▸'));
+      div.appendChild(elem('span', 'log-mini-text', 'to act'));
       break;
     }
     case 'play': {
-      const ico = document.createElement('span');
-      ico.className = 'log-icon';
-      ico.textContent = data.mode === 'dice' ? '🎲' : (data.mode === 'poker' ? '♠' : '🂠');
-      div.appendChild(ico);
-      const pn = document.createElement('span');
-      pn.className = 'log-player';
-      pn.textContent = data.player || '';
-      div.appendChild(pn);
-      const body = document.createElement('span');
-      body.className = 'log-body';
+      div.appendChild(makePlayerChip(data.player || ''));
+      div.appendChild(elem('span', 'log-arrow', '▸'));
       if (data.mode === 'dice') {
-        body.innerHTML = ' bids ';
-        const qty = document.createElement('span');
-        qty.className = 'log-num';
-        qty.textContent = data.qty;
-        body.appendChild(qty);
-        body.appendChild(document.createTextNode(' × '));
-        body.appendChild(makeDie(data.face));
-        if (data.face === 1) {
-          const w = document.createElement('span');
-          w.className = 'log-wild';
-          w.textContent = 'WILD';
-          body.appendChild(w);
-        }
+        div.appendChild(elem('span', 'log-mini-text', 'bids'));
+        div.appendChild(elem('span', 'log-qty', String(data.qty)));
+        div.appendChild(elem('span', 'log-mult', '×'));
+        div.appendChild(makeDie(data.face));
+        if (data.face === 1) div.appendChild(elem('span', 'log-wild', 'WILD'));
       } else if (data.mode === 'cards') {
-        body.innerHTML = ` plays <span class="log-num">${data.count}</span> as `;
-        const tc = document.createElement('span');
-        tc.className = `log-tablecard tc-${(data.tableCard || '').toLowerCase()}`;
-        tc.textContent = data.tableCard + (data.count > 1 ? 's' : '');
-        body.appendChild(tc);
+        const tray = elem('span', 'log-cards-row');
+        for (let i = 0; i < Math.min(data.count || 1, 3); i++) tray.appendChild(makeMiniCardBack());
+        div.appendChild(tray);
+        div.appendChild(elem('span', 'log-mini-text', 'as'));
+        div.appendChild(makeMiniLiarsCard(data.tableCard));
       } else if (data.mode === 'poker') {
-        body.innerHTML = ` declares <span class="log-decl">${escapeHtml(data.declaration)}</span>`;
-      } else {
-        body.textContent = ' ' + (entry.msg.split(' ').slice(1).join(' '));
+        const tray = elem('span', 'log-cards-row');
+        for (let i = 0; i < Math.min(data.count || 1, 3); i++) tray.appendChild(makeMiniCardBack());
+        div.appendChild(tray);
+        div.appendChild(elem('span', 'log-mini-text', 'as'));
+        div.appendChild(makeRankChip(data.targetRank));
       }
-      div.appendChild(body);
       break;
     }
     case 'liar': {
-      const ico = document.createElement('span');
-      ico.className = 'log-icon liar-bolt';
-      ico.textContent = '⚡';
-      div.appendChild(ico);
-      const caller = document.createElement('span');
-      caller.className = 'log-player';
-      caller.textContent = data.caller || '';
-      div.appendChild(caller);
-      const middle = document.createElement('span');
-      middle.className = 'log-liar-text';
-      middle.textContent = ' calls LIAR on ';
-      div.appendChild(middle);
-      const accused = document.createElement('span');
-      accused.className = 'log-player';
-      accused.textContent = data.accused || '';
-      div.appendChild(accused);
-      div.appendChild(document.createTextNode('!'));
+      div.appendChild(makePlayerChip(data.caller || '', 'log-player-caller'));
+      const center = elem('span', 'log-liar-center');
+      center.innerHTML = `<span class="liar-bolt log-icon">⚡</span><span class="log-liar-text">LIAR</span><span class="liar-bolt log-icon">⚡</span>`;
+      div.appendChild(center);
+      div.appendChild(makePlayerChip(data.accused || '', 'log-player-accused'));
       break;
     }
     case 'spoton': {
-      const ico = document.createElement('span');
-      ico.className = 'log-icon spoton-target';
-      ico.textContent = '🎯';
-      div.appendChild(ico);
-      const caller = document.createElement('span');
-      caller.className = 'log-player';
-      caller.textContent = data.caller || '';
-      div.appendChild(caller);
-      const middle = document.createElement('span');
-      middle.className = 'log-spoton-text';
-      middle.textContent = ' calls SPOT ON on ';
-      div.appendChild(middle);
-      const accused = document.createElement('span');
-      accused.className = 'log-player';
-      accused.textContent = data.accused || '';
-      div.appendChild(accused);
-      div.appendChild(document.createTextNode('!'));
+      div.appendChild(makePlayerChip(data.caller || '', 'log-player-caller'));
+      const center = elem('span', 'log-spoton-center');
+      center.innerHTML = `<span class="spoton-target log-icon">🎯</span><span class="log-spoton-text">SPOT ON</span>`;
+      div.appendChild(center);
+      div.appendChild(makePlayerChip(data.accused || '', 'log-player-accused'));
       break;
     }
     case 'verdict-truth':
     case 'verdict-lie': {
-      const tag = document.createElement('span');
-      tag.className = 'log-verdict-tag ' + (entry.type === 'verdict-truth' ? 'truth' : 'lie');
-      tag.textContent = entry.type === 'verdict-truth' ? 'TRUTH' : 'LIE';
-      div.appendChild(tag);
-      const body = document.createElement('span');
-      body.className = 'log-body';
-      body.textContent = ' ' + entry.msg;
-      div.appendChild(body);
+      const truth = entry.type === 'verdict-truth';
+      div.appendChild(elem('span', 'log-verdict-tag ' + (truth ? 'truth' : 'lie'), truth ? 'TRUTH' : 'LIE'));
+      if (data.mode === 'dice') {
+        const body = elem('span', 'log-verdict-body');
+        body.appendChild(elem('span', 'log-qty', String(data.qty)));
+        body.appendChild(elem('span', 'log-mult', '×'));
+        body.appendChild(makeDie(data.face));
+        body.appendChild(elem('span', 'log-eq', '='));
+        body.appendChild(elem('span', 'log-num', String(data.count)));
+        div.appendChild(body);
+      } else if (data.mode === 'cards' && Array.isArray(data.cards)) {
+        const tray = elem('span', 'log-cards-row');
+        for (const c of data.cards) tray.appendChild(makeMiniLiarsCard(c));
+        div.appendChild(tray);
+      } else if (data.mode === 'poker' && Array.isArray(data.cards)) {
+        const tray = elem('span', 'log-cards-row');
+        for (const c of data.cards) tray.appendChild(makeMiniPokerCard(c));
+        div.appendChild(tray);
+      } else {
+        div.appendChild(elem('span', 'log-verdict-body', entry.msg));
+      }
       break;
     }
     case 'tension': {
-      div.innerHTML = `<span class="log-icon">🔫</span> <span class="log-tension-text">${escapeHtml(entry.msg)}</span>`;
+      div.appendChild(makeRevolverIcon());
+      div.appendChild(makePlayerChip(data.player || ''));
+      div.appendChild(elem('span', 'log-tension-dots', '…'));
       break;
     }
     case 'dead': {
-      const ico = document.createElement('span');
-      ico.className = 'log-icon log-bang-icon';
-      ico.textContent = '💥';
-      div.appendChild(ico);
-      const text = document.createElement('span');
-      text.className = 'log-bang-text';
-      text.innerHTML = `BANG — <span class="log-player">${escapeHtml(data.player || '')}</span> is dead.`;
-      div.appendChild(text);
+      div.appendChild(makeRevolverIcon({ fired: true }));
+      div.appendChild(elem('span', 'log-bang-text', 'BANG'));
+      div.appendChild(makePlayerChip(data.player || '', 'log-player-dead'));
+      div.appendChild(elem('span', 'log-dead-x', '✕'));
       break;
     }
     case 'survive': {
-      const ico = document.createElement('span');
-      ico.className = 'log-icon';
-      ico.textContent = '•';
-      div.appendChild(ico);
-      const text = document.createElement('span');
-      text.className = 'log-survive-text';
-      text.innerHTML = `<i>click</i> — <span class="log-player">${escapeHtml(data.player || '')}</span> survives. <span class="log-chambers-left">${data.chambersLeft || 0} left</span>`;
-      div.appendChild(text);
+      div.appendChild(makeRevolverIcon({ smoke: true }));
+      div.appendChild(elem('span', 'log-click-text', '*click*'));
+      div.appendChild(makePlayerChip(data.player || ''));
+      div.appendChild(makeChamberRow(data.chambersLeft || 0));
       break;
     }
     case 'win': {
-      const ico = document.createElement('span');
-      ico.className = 'log-icon log-trophy';
-      ico.textContent = '🏆';
-      div.appendChild(ico);
-      const text = document.createElement('span');
-      text.className = 'log-win-text';
-      text.innerHTML = `<span class="log-player">${escapeHtml(data.player || '')}</span> wins the bar!`;
-      div.appendChild(text);
+      div.appendChild(elem('span', 'log-icon log-trophy', '🏆'));
+      div.appendChild(makePlayerChip(data.player || '', 'log-player-winner'));
+      div.appendChild(elem('span', 'log-win-text', 'wins the bar'));
       break;
     }
     case 'system':
     default: {
-      const text = document.createElement('span');
-      text.className = 'log-system-text';
-      text.textContent = entry.msg;
-      div.appendChild(text);
+      div.appendChild(elem('span', 'log-system-text', entry.msg));
     }
   }
   return div;
