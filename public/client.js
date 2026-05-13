@@ -604,6 +604,61 @@ function makeChamberRow(chambersLeft, total = 6) {
   return row;
 }
 
+function makeStamp(text, kind) {
+  return elem('span', `stamp stamp-${kind}`, text);
+}
+
+function makeBidBanner(qty, face) {
+  const b = elem('span', 'bid-banner');
+  b.appendChild(elem('span', 'bb-qty', String(qty)));
+  b.appendChild(elem('span', 'bb-mult', '×'));
+  b.appendChild(makeDie(face));
+  if (face === 1) b.appendChild(elem('span', 'bb-wild', 'WILD'));
+  return b;
+}
+
+function makeClaimBanner(cardSprites, claimSprite) {
+  const b = elem('span', 'claim-banner');
+  const row = elem('span', 'cb-row');
+  for (const c of cardSprites) row.appendChild(c);
+  b.appendChild(row);
+  b.appendChild(elem('span', 'cb-arrow', '⇒'));
+  b.appendChild(claimSprite);
+  return b;
+}
+
+function makeRoundBanner(n) {
+  const b = elem('span', 'round-banner');
+  b.appendChild(elem('span', 'rb-flourish', '✦'));
+  b.appendChild(elem('span', 'rb-text', `Round ${n}`));
+  b.appendChild(elem('span', 'rb-flourish', '✦'));
+  return b;
+}
+
+function makeMuzzleFlash() {
+  return elem('span', 'muzzle-flash');
+}
+
+function makeSmokeWisp() {
+  const w = elem('span', 'smoke-wisp');
+  w.innerHTML = '<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M3 16 Q 6 10, 10 14 T 18 8" stroke="#bbb" stroke-width="1.8" fill="none" stroke-linecap="round" opacity="0.7"/></svg>';
+  return w;
+}
+
+function makePointerArrows() {
+  const p = elem('span', 'pointer-arrows');
+  p.innerHTML = '<span>▸</span><span>▸</span><span>▸</span>';
+  return p;
+}
+
+function makeSkull() {
+  return elem('span', 'log-skull-icon', '💀');
+}
+
+function makeCrown() {
+  return elem('span', 'log-crown-icon', '👑');
+}
+
 function makeLogEntry(entry) {
   const div = document.createElement('div');
   div.className = `log-entry log-${entry.type}`;
@@ -612,19 +667,20 @@ function makeLogEntry(entry) {
   switch (entry.type) {
     case 'round': {
       const n = data.round || (entry.msg.match(/\d+/) || ['?'])[0];
-      div.appendChild(elem('span', 'log-round-banner', `Round ${n}`));
+      div.appendChild(makeRoundBanner(n));
       break;
     }
     case 'round-info': {
       if (data.mode === 'cards' && data.tableCard) {
-        div.appendChild(elem('span', 'log-mini-label', 'Table card'));
-        div.appendChild(makeMiniLiarsCard(data.tableCard));
+        const big = makeMiniLiarsCard(data.tableCard);
+        big.classList.add('mlc-large');
+        div.appendChild(big);
       } else if (data.mode === 'poker' && data.targetRank) {
-        div.appendChild(elem('span', 'log-mini-label', 'Target'));
-        div.appendChild(makeRankChip(data.targetRank));
+        const big = makeRankChip(data.targetRank);
+        big.classList.add('rank-chip-large');
+        div.appendChild(big);
       } else if (data.mode === 'dice') {
-        div.appendChild(elem('span', 'log-mini-label', 'Dice rolled'));
-        const tray = elem('span', 'log-cards-row');
+        const tray = elem('span', 'log-cards-row log-dice-rolled');
         tray.appendChild(makeDie(2));
         tray.appendChild(makeDie(5));
         tray.appendChild(makeDie(3));
@@ -635,67 +691,57 @@ function makeLogEntry(entry) {
       break;
     }
     case 'event': {
-      div.appendChild(elem('span', 'log-event-banner', entry.msg));
+      const banner = elem('span', 'log-event-banner');
+      banner.appendChild(elem('span', 'eb-flourish', '✦'));
+      banner.appendChild(elem('span', 'eb-text', entry.msg));
+      banner.appendChild(elem('span', 'eb-flourish', '✦'));
+      div.appendChild(banner);
       break;
     }
     case 'turn': {
       div.appendChild(makePlayerChip(data.player || ''));
-      div.appendChild(elem('span', 'log-arrow', '▸'));
-      div.appendChild(elem('span', 'log-mini-text', 'to act'));
+      div.appendChild(makePointerArrows());
       break;
     }
     case 'play': {
       div.appendChild(makePlayerChip(data.player || ''));
-      div.appendChild(elem('span', 'log-arrow', '▸'));
       if (data.mode === 'dice') {
-        div.appendChild(elem('span', 'log-mini-text', 'bids'));
-        div.appendChild(elem('span', 'log-qty', String(data.qty)));
-        div.appendChild(elem('span', 'log-mult', '×'));
-        div.appendChild(makeDie(data.face));
-        if (data.face === 1) div.appendChild(elem('span', 'log-wild', 'WILD'));
+        div.appendChild(makeBidBanner(data.qty, data.face));
       } else if (data.mode === 'cards') {
-        const tray = elem('span', 'log-cards-row');
-        for (let i = 0; i < Math.min(data.count || 1, 3); i++) tray.appendChild(makeMiniCardBack());
-        div.appendChild(tray);
-        div.appendChild(elem('span', 'log-mini-text', 'as'));
-        div.appendChild(makeMiniLiarsCard(data.tableCard));
+        const cardBacks = [];
+        for (let i = 0; i < Math.min(data.count || 1, 3); i++) cardBacks.push(makeMiniCardBack());
+        div.appendChild(makeClaimBanner(cardBacks, makeMiniLiarsCard(data.tableCard)));
       } else if (data.mode === 'poker') {
-        const tray = elem('span', 'log-cards-row');
-        for (let i = 0; i < Math.min(data.count || 1, 3); i++) tray.appendChild(makeMiniCardBack());
-        div.appendChild(tray);
-        div.appendChild(elem('span', 'log-mini-text', 'as'));
-        div.appendChild(makeRankChip(data.targetRank));
+        const cardBacks = [];
+        for (let i = 0; i < Math.min(data.count || 1, 3); i++) cardBacks.push(makeMiniCardBack());
+        div.appendChild(makeClaimBanner(cardBacks, makeRankChip(data.targetRank)));
       }
       break;
     }
     case 'liar': {
       div.appendChild(makePlayerChip(data.caller || '', 'log-player-caller'));
-      const center = elem('span', 'log-liar-center');
-      center.innerHTML = `<span class="liar-bolt log-icon">⚡</span><span class="log-liar-text">LIAR</span><span class="liar-bolt log-icon">⚡</span>`;
-      div.appendChild(center);
+      div.appendChild(elem('span', 'liar-bolt log-icon', '⚡'));
+      div.appendChild(makeStamp('LIAR', 'liar'));
+      div.appendChild(elem('span', 'liar-bolt log-icon', '⚡'));
       div.appendChild(makePlayerChip(data.accused || '', 'log-player-accused'));
       break;
     }
     case 'spoton': {
       div.appendChild(makePlayerChip(data.caller || '', 'log-player-caller'));
-      const center = elem('span', 'log-spoton-center');
-      center.innerHTML = `<span class="spoton-target log-icon">🎯</span><span class="log-spoton-text">SPOT ON</span>`;
-      div.appendChild(center);
+      div.appendChild(elem('span', 'spoton-target log-icon', '🎯'));
+      div.appendChild(makeStamp('SPOT ON', 'spoton'));
+      div.appendChild(elem('span', 'spoton-target log-icon', '🎯'));
       div.appendChild(makePlayerChip(data.accused || '', 'log-player-accused'));
       break;
     }
     case 'verdict-truth':
     case 'verdict-lie': {
       const truth = entry.type === 'verdict-truth';
-      div.appendChild(elem('span', 'log-verdict-tag ' + (truth ? 'truth' : 'lie'), truth ? 'TRUTH' : 'LIE'));
+      div.appendChild(makeStamp(truth ? 'TRUTH' : 'LIE', truth ? 'truth' : 'lie'));
       if (data.mode === 'dice') {
-        const body = elem('span', 'log-verdict-body');
-        body.appendChild(elem('span', 'log-qty', String(data.qty)));
-        body.appendChild(elem('span', 'log-mult', '×'));
-        body.appendChild(makeDie(data.face));
-        body.appendChild(elem('span', 'log-eq', '='));
-        body.appendChild(elem('span', 'log-num', String(data.count)));
-        div.appendChild(body);
+        div.appendChild(makeBidBanner(data.qty, data.face));
+        div.appendChild(elem('span', 'log-eq', '='));
+        div.appendChild(elem('span', 'log-found-num', String(data.count)));
       } else if (data.mode === 'cards' && Array.isArray(data.cards)) {
         const tray = elem('span', 'log-cards-row');
         for (const c of data.cards) tray.appendChild(makeMiniLiarsCard(c));
@@ -704,27 +750,27 @@ function makeLogEntry(entry) {
         const tray = elem('span', 'log-cards-row');
         for (const c of data.cards) tray.appendChild(makeMiniPokerCard(c));
         div.appendChild(tray);
-      } else {
-        div.appendChild(elem('span', 'log-verdict-body', entry.msg));
       }
       break;
     }
     case 'tension': {
       div.appendChild(makeRevolverIcon());
       div.appendChild(makePlayerChip(data.player || ''));
-      div.appendChild(elem('span', 'log-tension-dots', '…'));
+      const dots = elem('span', 'tension-dots-anim');
+      dots.innerHTML = '<span></span><span></span><span></span>';
+      div.appendChild(dots);
       break;
     }
     case 'dead': {
       div.appendChild(makeRevolverIcon({ fired: true }));
-      div.appendChild(elem('span', 'log-bang-text', 'BANG'));
+      div.appendChild(makeMuzzleFlash());
       div.appendChild(makePlayerChip(data.player || '', 'log-player-dead'));
-      div.appendChild(elem('span', 'log-dead-x', '✕'));
+      div.appendChild(makeSkull());
       break;
     }
     case 'survive': {
       div.appendChild(makeRevolverIcon({ smoke: true }));
-      div.appendChild(elem('span', 'log-click-text', '*click*'));
+      div.appendChild(makeSmokeWisp());
       div.appendChild(makePlayerChip(data.player || ''));
       div.appendChild(makeChamberRow(data.chambersLeft || 0));
       break;
@@ -732,7 +778,7 @@ function makeLogEntry(entry) {
     case 'win': {
       div.appendChild(elem('span', 'log-icon log-trophy', '🏆'));
       div.appendChild(makePlayerChip(data.player || '', 'log-player-winner'));
-      div.appendChild(elem('span', 'log-win-text', 'wins the bar'));
+      div.appendChild(makeCrown());
       break;
     }
     case 'system':
