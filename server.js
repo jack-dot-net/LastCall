@@ -102,7 +102,8 @@ function getRoomState(room, viewerId) {
     base.yourDice = me ? (me.dice || []) : [];
     base.totalDiceInPlay = room.players.filter(p => p.alive).reduce((s, p) => s + (p.dice ? p.dice.length : 0), 0);
   } else if (room.gameMode === 'poker') {
-    base.lastDeclaration = room.lastDeclaration;
+    base.targetRank = room.targetRank;
+    base.lastPlayedCount = room.lastPlayedCards ? room.lastPlayedCards.length : 0;
     base.yourHand = me ? (me.hand || []) : [];
   }
   return base;
@@ -406,47 +407,16 @@ const diceGame = {
 };
 
 // ============================================================
-// POKER MODE (Bluff Poker)
+// POKER MODE — Liar's-Bar-style with 52-card deck
 // ============================================================
-
-const HAND_TYPES = ['pair', 'twopair', 'three', 'straight', 'flush', 'fullhouse', 'quads', 'straightflush'];
-const HAND_TYPE_RANK_RANGE = {
-  pair: [2, 14],
-  twopair: [3, 14],
-  three: [2, 14],
-  straight: [5, 14],
-  flush: [0, 0],
-  fullhouse: [2, 14],
-  quads: [2, 14],
-  straightflush: [0, 0],
-};
-
-function declarationValue(type, rank) {
-  const base = { pair: 0, twopair: 13, three: 24, straight: 37, flush: 47, fullhouse: 48, quads: 61, straightflush: 74 };
-  const b = base[type];
-  if (b === undefined) return -1;
-  if (type === 'flush' || type === 'straightflush') return b;
-  if (type === 'twopair') return b + (rank - 3);
-  if (type === 'straight') return b + (rank - 5);
-  return b + (rank - 2);
-}
 
 function rankName(r) {
   return ({ 11: 'J', 12: 'Q', 13: 'K', 14: 'A' })[r] || String(r);
 }
 
-function formatDeclaration(type, rank) {
-  switch (type) {
-    case 'pair': return `Pair of ${rankName(rank)}s`;
-    case 'twopair': return `Two pair, ${rankName(rank)}s high`;
-    case 'three': return `Three ${rankName(rank)}s`;
-    case 'straight': return `Straight to ${rankName(rank)}`;
-    case 'flush': return 'Flush';
-    case 'fullhouse': return `Full house, ${rankName(rank)}s full`;
-    case 'quads': return `Four ${rankName(rank)}s`;
-    case 'straightflush': return 'Straight flush';
-    default: return '?';
-  }
+function pokerCardLabel(c) {
+  if (c && c.joker) return 'Joker';
+  return `${rankName(c.rank)}${c.suit}`;
 }
 
 function createPokerDeck(numDecks) {
@@ -456,65 +426,17 @@ function createPokerDeck(numDecks) {
     for (const s of suits) {
       for (let r = 2; r <= 14; r++) deck.push({ rank: r, suit: s });
     }
+    deck.push({ joker: true });
+    deck.push({ joker: true });
   }
   return deck;
-}
-
-function checkStraight(rankCounts, highRank) {
-  for (let off = 0; off < 5; off++) {
-    let r = highRank - off;
-    if (highRank === 5 && r === 1) r = 14;
-    if (!rankCounts[r]) return false;
-  }
-  return true;
-}
-
-function checkHandExists(pool, type, rank) {
-  const rankCounts = {};
-  const suitCounts = {};
-  const ranksBySuit = { S: new Set(), H: new Set(), D: new Set(), C: new Set() };
-  for (const c of pool) {
-    rankCounts[c.rank] = (rankCounts[c.rank] || 0) + 1;
-    suitCounts[c.suit] = (suitCounts[c.suit] || 0) + 1;
-    ranksBySuit[c.suit].add(c.rank);
-  }
-  if (type === 'pair') return (rankCounts[rank] || 0) >= 2;
-  if (type === 'three') return (rankCounts[rank] || 0) >= 3;
-  if (type === 'quads') return (rankCounts[rank] || 0) >= 4;
-  if (type === 'twopair') {
-    if ((rankCounts[rank] || 0) < 2) return false;
-    for (let r = 2; r < rank; r++) if ((rankCounts[r] || 0) >= 2) return true;
-    return false;
-  }
-  if (type === 'fullhouse') {
-    if ((rankCounts[rank] || 0) < 3) return false;
-    for (let r = 2; r <= 14; r++) if (r !== rank && (rankCounts[r] || 0) >= 2) return true;
-    return false;
-  }
-  if (type === 'straight') return checkStraight(rankCounts, rank);
-  if (type === 'flush') return Object.values(suitCounts).some(c => c >= 5);
-  if (type === 'straightflush') {
-    for (const s of ['S', 'H', 'D', 'C']) {
-      const ranks = ranksBySuit[s];
-      for (let high = 5; high <= 14; high++) {
-        let allPresent = true;
-        for (let off = 0; off < 5; off++) {
-          let r = high - off;
-          if (high === 5 && r === 1) r = 14;
-          if (!ranks.has(r)) { allPresent = false; break; }
-        }
-        if (allPresent) return true;
-      }
-    }
-    return false;
-  }
-  return false;
 }
 
 const pokerGame = {
   name: 'poker',
   init(room) {
-    room.lastDeclaration = null;
+    room.targetRank = null;
+    room.lastPlayedCards = null;
     room.lastActorIdx = null;
     room.currentPlayerIdx = null;
     room.roundNumber = 0;
@@ -529,78 +451,69 @@ const pokerGame = {
       return;
     }
     const cardsNeeded = survivors.length * 5;
-    const numDecks = Math.max(1, Math.ceil(cardsNeeded / 52));
+    const numDecks = Math.max(1, Math.ceil(cardsNeeded / 54));
     const deck = shuffle(createPokerDeck(numDecks));
     let idx = 0;
     for (const p of room.players) {
       if (p.alive) { p.hand = deck.slice(idx, idx + 5); idx += 5; }
       else { p.hand = []; }
     }
-    room.lastDeclaration = null;
+    // Pick a random target rank for this round
+    room.targetRank = 2 + Math.floor(Math.random() * 13);
+    room.lastPlayedCards = null;
     room.lastActorIdx = null;
     room.roundNumber++;
     if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
       room.currentPlayerIdx = pickRandomAlive(room);
     }
     addLog(room, `Round ${room.roundNumber}`, 'round');
-    addLog(room, 'Hands dealt.', 'round-info', { event: 'hands-dealt' });
-    addLog(room, `${room.players[room.currentPlayerIdx].name} declares first.`, 'turn');
+    addLog(room, `Target rank: ${rankName(room.targetRank)}`, 'round-info', { targetRank: room.targetRank });
+    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`, 'turn');
     broadcastRoom(room);
   },
-  handlePlay(room, socket, { type, rank }) {
+  handlePlay(room, socket, { indices }) {
     const playerIdx = room.players.findIndex(p => p.id === socket.id);
     if (playerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
     const player = room.players[playerIdx];
     if (!player.alive) return;
-    if (!HAND_TYPES.includes(type)) return socket.emit('errorMsg', 'Invalid hand type.');
-    const [rMin, rMax] = HAND_TYPE_RANK_RANGE[type];
-    if (rMin > 0) {
-      rank = parseInt(rank);
-      if (!Number.isInteger(rank) || rank < rMin || rank > rMax) return socket.emit('errorMsg', 'Invalid rank.');
-    } else {
-      rank = 0;
+    if (!Array.isArray(indices) || indices.length < 1 || indices.length > 3) {
+      return socket.emit('errorMsg', 'You must play 1–3 cards.');
     }
-    const v = declarationValue(type, rank);
-    if (room.lastDeclaration) {
-      const prev = declarationValue(room.lastDeclaration.type, room.lastDeclaration.rank);
-      if (v <= prev) return socket.emit('errorMsg', 'Declaration must increase.');
-    }
-    room.lastDeclaration = { type, rank, playerIdx };
+    const uniq = [...new Set(indices)].filter(i => Number.isInteger(i) && i >= 0 && i < player.hand.length);
+    if (uniq.length !== indices.length) return socket.emit('errorMsg', 'Invalid selection.');
+    uniq.sort((a, b) => b - a);
+    const played = uniq.map(i => player.hand.splice(i, 1)[0]);
+    room.lastPlayedCards = played;
     room.lastActorIdx = playerIdx;
-    addLog(room, `${player.name} declares ${formatDeclaration(type, rank)}.`, 'play', { player: player.name, mode: 'poker', declaration: formatDeclaration(type, rank) });
+    const tn = rankName(room.targetRank);
+    addLog(room, `${player.name} plays ${played.length} card${played.length > 1 ? 's' : ''} as ${tn}${played.length > 1 ? 's' : ''}.`, 'play', { player: player.name, mode: 'poker', count: played.length, targetRank: room.targetRank });
     room.currentPlayerIdx = nextAlivePlayer(room, playerIdx);
     broadcastRoom(room);
   },
   handleLiar(room, socket) {
     const callerIdx = room.players.findIndex(p => p.id === socket.id);
     if (callerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
-    if (!room.lastDeclaration) return socket.emit('errorMsg', 'No declaration yet.');
-    const caller = room.players[callerIdx];
-    const declarer = room.players[room.lastDeclaration.playerIdx];
-    const { type, rank } = room.lastDeclaration;
-
-    const pool = [];
-    const allHands = [];
-    for (const p of room.players) {
-      if (p.alive) {
-        pool.push(...p.hand);
-        allHands.push({ playerId: p.id, name: p.name, hand: p.hand.slice() });
-      }
+    if (room.lastPlayedCards === null || room.lastActorIdx === null) {
+      return socket.emit('errorMsg', 'No one has played yet.');
     }
-    const exists = checkHandExists(pool, type, rank);
-    const loser = exists ? caller : declarer;
+    const caller = room.players[callerIdx];
+    const accused = room.players[room.lastActorIdx];
+    const cards = room.lastPlayedCards;
+    const target = room.targetRank;
+    const allMatch = cards.every(c => c.joker || c.rank === target);
+    const loser = allMatch ? caller : accused;
 
-    addLog(room, `${caller.name} calls LIAR on ${declarer.name}!`, 'liar', { caller: caller.name, accused: declarer.name });
-    addLog(room, `${formatDeclaration(type, rank)} — ${exists ? 'found in pool.' : 'not in the pool.'}`, exists ? 'verdict-truth' : 'verdict-lie');
+    addLog(room, `${caller.name} calls LIAR on ${accused.name}!`, 'liar', { caller: caller.name, accused: accused.name });
+    addLog(room, `Cards: ${cards.map(pokerCardLabel).join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`, allMatch ? 'verdict-truth' : 'verdict-lie');
     addLog(room, `${loser.name} pulls the trigger…`, 'tension');
 
     room.resolving = true;
     io.to(room.code).emit('reveal', {
-      mode: 'poker', type, rank, exists, allHands,
-      declarerId: declarer.id, callerId: caller.id, loserId: loser.id,
+      mode: 'poker', cards, targetRank: target, truthful: allMatch,
+      accusedId: accused.id, callerId: caller.id, loserId: loser.id,
     });
     broadcastRoom(room);
-    performShot(room, loser.id, caller.id, declarer.id);
+    performShot(room, loser.id, caller.id, accused.id);
   },
 };
 
@@ -633,7 +546,7 @@ io.on('connection', (socket) => {
       code, hostId: socket.id, players: [],
       state: 'lobby', gameMode: 'cards',
       tableCard: null, lastPlayedCards: null,
-      lastBid: null, lastDeclaration: null,
+      lastBid: null, targetRank: null,
       currentPlayerIdx: null, lastActorIdx: null,
       roundNumber: 0, log: [], resolving: false,
     };
@@ -700,7 +613,7 @@ io.on('connection', (socket) => {
     room.tableCard = null;
     room.lastPlayedCards = null;
     room.lastBid = null;
-    room.lastDeclaration = null;
+    room.targetRank = null;
     room.currentPlayerIdx = null;
     room.lastActorIdx = null;
     room.roundNumber = 0;

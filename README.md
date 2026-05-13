@@ -4,7 +4,7 @@ A web-based multiplayer game with three modes — all share the same revolver: b
 
 - **Liar's Cards** — Kings, Queens, Aces, and wild Jokers. Play 1–3 face down claiming they match the table card.
 - **Liar's Dice** — 5 hidden dice each. Bid quantity × face across all dice (1s are wild). Raise or call.
-- **Bluff Poker** — 5 cards each. Declare a poker hand of strictly increasing rank that supposedly exists in the combined pool of every player's hand.
+- **Poker** — Same flow as Liar's Cards but with a 52-card poker deck plus 2 wild Jokers. Each round picks a random target rank (2–A); you play 1–3 cards face down claiming they match.
 
 Built with Node.js + Express + Socket.IO and 2D sprites (no build step, no framework). Designed for one-click deploy to Render.
 
@@ -48,12 +48,11 @@ Each gun has 6 chambers and 1 bullet at a random position. The chamber advances 
 - 1s are wild — they count as whatever face is being bid (except when 1 itself is bid).
 - Call LIAR to reveal all dice; if the count meets the bid, the caller loses; otherwise the bidder loses.
 
-### Bluff Poker
-- Each player is dealt 5 cards (standard 52-card deck, scaled up if needed).
-- Declare a poker hand: pair, two pair, three of a kind, straight, flush, full house, four of a kind, or straight flush — with the relevant rank.
-- Each next declaration must strictly outrank the previous.
-- The claim: that hand exists somewhere in the **combined pool of every player's cards**.
-- Call LIAR to reveal everyone's hands. If the hand is in the pool, the caller loses; otherwise the declarer loses.
+### Poker
+- Standard 52-card deck plus 2 wild Jokers (scaled up if needed for big games).
+- Each round one rank (2 through A) is randomly chosen as the target. Each player is dealt 5 cards.
+- On your turn, play 1–3 cards face down claiming they're the target rank (Jokers always count as a match), or call LIAR.
+- LIAR resolves the same way as Liar's Cards: liar shoots if they lied, false accuser shoots otherwise.
 
 ## Project layout
 

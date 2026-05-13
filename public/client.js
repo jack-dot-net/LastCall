@@ -14,21 +14,7 @@ const PIP_LAYOUTS = {
   5: [[1,1],[1,3],[2,2],[3,1],[3,3]],
   6: [[1,1],[1,3],[2,1],[2,3],[3,1],[3,3]],
 };
-const MODE_LABELS = { cards: "Liar's Cards", dice: "Liar's Dice", poker: 'Bluff Poker' };
-const HAND_TYPE_LABELS = {
-  pair: 'Pair', twopair: 'Two Pair', three: 'Three of a Kind',
-  straight: 'Straight', flush: 'Flush', fullhouse: 'Full House',
-  quads: 'Four of a Kind', straightflush: 'Straight Flush'
-};
-const HAND_TYPE_RANK_RANGE = {
-  pair: [2, 14], twopair: [3, 14], three: [2, 14],
-  straight: [5, 14], flush: [0, 0], fullhouse: [2, 14],
-  quads: [2, 14], straightflush: [0, 0],
-};
-const HAND_TYPE_BASE = {
-  pair: 0, twopair: 13, three: 24, straight: 37,
-  flush: 47, fullhouse: 48, quads: 61, straightflush: 74
-};
+const MODE_LABELS = { cards: "Liar's Cards", dice: "Liar's Dice", poker: 'Poker' };
 
 function $(id) { return document.getElementById(id); }
 function showScreen(name) {
@@ -47,26 +33,10 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function rankName(r) { return ({11:'J',12:'Q',13:'K',14:'A'})[r] || String(r); }
-function declarationValue(type, rank) {
-  const b = HAND_TYPE_BASE[type];
-  if (b === undefined) return -1;
-  if (type === 'flush' || type === 'straightflush') return b;
-  if (type === 'twopair') return b + (rank - 3);
-  if (type === 'straight') return b + (rank - 5);
-  return b + (rank - 2);
-}
-function formatDeclaration(type, rank) {
-  switch (type) {
-    case 'pair': return `Pair of ${rankName(rank)}s`;
-    case 'twopair': return `Two pair, ${rankName(rank)}s high`;
-    case 'three': return `Three ${rankName(rank)}s`;
-    case 'straight': return `Straight to ${rankName(rank)}`;
-    case 'flush': return 'Flush';
-    case 'fullhouse': return `Full house, ${rankName(rank)}s full`;
-    case 'quads': return `Four ${rankName(rank)}s`;
-    case 'straightflush': return 'Straight flush';
-    default: return '?';
-  }
+function pokerCardLabel(c) {
+  if (!c) return '?';
+  if (c.joker) return 'Joker';
+  return `${rankName(c.rank)}${SUITS_POKER[c.suit] || ''}`;
 }
 
 function loadName() { try { return localStorage.getItem('liarsbar.name') || ''; } catch { return ''; } }
@@ -74,64 +44,6 @@ function saveName(n) { try { localStorage.setItem('liarsbar.name', n); } catch {
 
 const savedName = loadName();
 if (savedName) $('name-input').value = savedName;
-
-// View mode (3D default, 2D fallback)
-function loadViewMode() {
-  try { return localStorage.getItem('liarsbar.view') || '3d'; } catch { return '3d'; }
-}
-function saveViewMode(v) { try { localStorage.setItem('liarsbar.view', v); } catch {} }
-let _stageInitialized = false;
-function applyViewMode(v) {
-  document.body.classList.toggle('view-2d', v === '2d');
-  const btn = $('btn-view-toggle');
-  if (btn) btn.textContent = v === '2d' ? '3D View' : '2D View';
-  if (v === '3d') {
-    initStageIfReady();
-    if (window.Stage && window.Stage.isReady && window.Stage.isReady()) window.Stage.resume();
-  } else if (window.Stage && window.Stage.pause) {
-    window.Stage.pause();
-  }
-}
-function initStageIfReady() {
-  if (_stageInitialized) return true;
-  if (!window.THREE || !window.Stage) return false;
-  const canvas = $('stage-canvas');
-  if (!canvas) return false;
-  const parent = canvas.parentElement;
-  if (!parent || parent.clientHeight === 0) return false;
-  if (window.Stage.init(canvas)) {
-    _stageInitialized = true;
-    if (state) {
-      window.Stage.update(state);
-      updateStageOverlay();
-    }
-    return true;
-  }
-  return false;
-}
-applyViewMode(loadViewMode());
-if ($('btn-view-toggle')) {
-  $('btn-view-toggle').onclick = () => {
-    const next = document.body.classList.contains('view-2d') ? '3d' : '2d';
-    saveViewMode(next);
-    applyViewMode(next);
-    if (state) render();
-  };
-}
-
-function updateStageOverlay() {
-  if (!state) return;
-  const mb = $('mode-badge-3d');
-  if (mb) mb.textContent = MODE_LABELS[state.gameMode] || '';
-  const ti = $('turn-info-3d');
-  if (ti) {
-    const me = state.players.find(p => p.id === state.yourId);
-    const myIdx = state.players.findIndex(p => p.id === state.yourId);
-    const myTurn = myIdx === state.currentPlayerIdx && me && me.alive;
-    const current = state.players[state.currentPlayerIdx];
-    ti.textContent = current ? (myTurn ? 'Your turn.' : `Waiting for ${current.name}…`) : '';
-  }
-}
 
 // ============================================================
 // SPRITES
@@ -154,8 +66,23 @@ function makeDie(face, opts = {}) {
 
 function makePokerCard(card, opts = {}) {
   const div = document.createElement('div');
+  if (card && card.joker) {
+    div.className = 'poker-card joker'
+      + (opts.selected ? ' selected' : '')
+      + (opts.disabled ? ' disabled' : '')
+      + (opts.flipped ? ' flipped' : '');
+    div.innerHTML = `
+      <div class="pc-corner pc-top">JKR<br>★</div>
+      <div class="pc-center">★</div>
+      <div class="pc-corner pc-bot">JKR<br>★</div>
+    `;
+    return div;
+  }
   const suitClass = `suit-${card.suit.toLowerCase()}`;
-  div.className = `poker-card ${suitClass}` + (opts.selected ? ' selected' : '') + (opts.flipped ? ' flipped' : '');
+  div.className = `poker-card ${suitClass}`
+    + (opts.selected ? ' selected' : '')
+    + (opts.disabled ? ' disabled' : '')
+    + (opts.flipped ? ' flipped' : '');
   const suitChar = SUITS_POKER[card.suit];
   const rn = rankName(card.rank);
   div.innerHTML = `
@@ -297,86 +224,16 @@ function renderDiceControls() {
 }
 
 // ============================================================
-// GAME — POKER
+// GAME — POKER  (Liar's-Bar style: target rank, face-down play)
 // ============================================================
 
-$('decl-type').onchange = () => { updatePokerRankOptions(); updatePokerButtons(); };
-$('decl-rank').onchange = updatePokerButtons;
-$('btn-declare').onclick = () => {
-  const type = $('decl-type').value;
-  const [rMin] = HAND_TYPE_RANK_RANGE[type];
-  const rank = rMin > 0 ? parseInt($('decl-rank').value) : 0;
-  socket.emit('gameAction', { action: 'play', payload: { type, rank } });
+$('btn-play-poker').onclick = () => {
+  const indices = [...selectedCards];
+  if (indices.length < 1 || indices.length > 3) { toast('Select 1–3 cards.'); return; }
+  socket.emit('gameAction', { action: 'play', payload: { indices } });
+  selectedCards.clear();
 };
 $('btn-liar-poker').onclick = () => socket.emit('gameAction', { action: 'liar' });
-
-function updatePokerRankOptions() {
-  const type = $('decl-type').value;
-  const [rMin, rMax] = HAND_TYPE_RANK_RANGE[type];
-  const sel = $('decl-rank');
-  sel.innerHTML = '';
-  if (rMin === 0) {
-    sel.disabled = true;
-    const opt = document.createElement('option');
-    opt.textContent = '—';
-    opt.value = '0';
-    sel.appendChild(opt);
-  } else {
-    sel.disabled = false;
-    for (let r = rMin; r <= rMax; r++) {
-      const opt = document.createElement('option');
-      opt.value = String(r);
-      opt.textContent = rankName(r);
-      sel.appendChild(opt);
-    }
-    sel.value = String(rMin);
-  }
-}
-
-function setDefaultPokerDeclaration() {
-  if (!state) return;
-  if (state.lastDeclaration) {
-    const v = declarationValue(state.lastDeclaration.type, state.lastDeclaration.rank);
-    // Find the next valid declaration
-    for (const type of ['pair','twopair','three','straight','flush','fullhouse','quads','straightflush']) {
-      const [rMin, rMax] = HAND_TYPE_RANK_RANGE[type];
-      if (rMin === 0) {
-        if (declarationValue(type, 0) > v) {
-          $('decl-type').value = type;
-          updatePokerRankOptions();
-          return;
-        }
-      } else {
-        for (let r = rMin; r <= rMax; r++) {
-          if (declarationValue(type, r) > v) {
-            $('decl-type').value = type;
-            updatePokerRankOptions();
-            $('decl-rank').value = String(r);
-            return;
-          }
-        }
-      }
-    }
-  } else {
-    $('decl-type').value = 'pair';
-    updatePokerRankOptions();
-    $('decl-rank').value = '2';
-  }
-}
-
-function updatePokerButtons() {
-  const myIdx = state ? state.players.findIndex(p => p.id === state.yourId) : -1;
-  const myTurn = state && myIdx === state.currentPlayerIdx && state.players[myIdx]?.alive;
-  const type = $('decl-type').value;
-  const [rMin] = HAND_TYPE_RANK_RANGE[type];
-  const rank = rMin > 0 ? parseInt($('decl-rank').value) : 0;
-  let legal = true;
-  if (state?.lastDeclaration) {
-    legal = declarationValue(type, rank) > declarationValue(state.lastDeclaration.type, state.lastDeclaration.rank);
-  }
-  $('btn-declare').disabled = !myTurn || !legal;
-  $('btn-liar-poker').disabled = !myTurn || !state?.lastDeclaration;
-}
 
 // ============================================================
 // GAME OVER
@@ -400,14 +257,8 @@ socket.on('roomUpdate', (s) => {
   state = s;
   render();
 });
-socket.on('reveal', (data) => {
-  showReveal(data);
-  if (window.Stage && window.Stage.isReady()) window.Stage.reveal(data);
-});
-socket.on('shot', (data) => {
-  showShot(data);
-  if (window.Stage && window.Stage.isReady()) window.Stage.shot(data);
-});
+socket.on('reveal', (data) => showReveal(data));
+socket.on('shot', (data) => showShot(data));
 
 // ============================================================
 // RENDER
@@ -435,7 +286,7 @@ function renderLobby() {
   const modeHints = {
     cards: 'Play cards face down claiming they match the table card. Bluff or be honest.',
     dice: 'Bid total quantity × face across all hidden dice. 1s are wild.',
-    poker: 'Declare a poker hand that exists somewhere in everyone\'s combined cards.',
+    poker: '52-card deck plus wild Jokers. Play cards face down claiming they match the target rank.',
   };
   $('mode-hint').textContent = modeHints[state.gameMode] || '';
   const isHost = state.yourId === state.hostId;
@@ -462,15 +313,6 @@ function renderGame() {
   else if (state.gameMode === 'poker') renderPokerMode();
 
   renderLog();
-
-  // 3D stage
-  if (!document.body.classList.contains('view-2d')) {
-    if (!_stageInitialized) initStageIfReady();
-    if (window.Stage && window.Stage.isReady()) {
-      window.Stage.update(state);
-      updateStageOverlay();
-    }
-  }
 }
 
 function renderPlayers() {
@@ -494,6 +336,8 @@ function renderPlayers() {
     let countHtml = '';
     if (state.gameMode === 'dice') {
       countHtml = `<div class="player-count">🎲 × ${p.diceCount}</div>`;
+    } else if (state.gameMode === 'poker') {
+      countHtml = `<div class="player-count">♠ × ${p.handSize}</div>`;
     } else {
       countHtml = `<div class="player-count">🂠 × ${p.handSize}</div>`;
     }
@@ -542,15 +386,17 @@ function renderCenter() {
     di.textContent = `${state.totalDiceInPlay || 0} dice in play`;
     cd.appendChild(di);
   } else if (state.gameMode === 'poker') {
-    const dec = document.createElement('div');
-    dec.className = 'decl-display';
-    dec.innerHTML = `<div class="ctr-label">CURRENT DECLARATION</div><div class="ctr-value">${state.lastDeclaration ? formatDeclaration(state.lastDeclaration.type, state.lastDeclaration.rank) : '—'}</div>`;
-    cd.appendChild(dec);
-    const pl = document.createElement('div');
-    pl.className = 'pile-info';
-    const pool = state.players.filter(p => p.alive).reduce((s, p) => s + p.handSize, 0);
-    pl.textContent = `${pool} cards in the combined pool`;
-    cd.appendChild(pl);
+    const tc = document.createElement('div');
+    tc.className = 'table-card-display';
+    const tn = state.targetRank ? rankName(state.targetRank) : '?';
+    tc.innerHTML = `<div class="ctr-label">TARGET RANK</div><div class="ctr-value">${tn === '?' ? '?' : tn + 's'}</div>`;
+    cd.appendChild(tc);
+    const pi = document.createElement('div');
+    pi.className = 'pile-info';
+    pi.textContent = state.lastPlayedCount > 0
+      ? `${state.lastPlayedCount} card${state.lastPlayedCount > 1 ? 's' : ''} face down`
+      : 'No cards played yet';
+    cd.appendChild(pi);
   }
 
   $('turn-info').textContent = current
@@ -621,8 +467,10 @@ function renderDiceMode() {
 
 // ===== POKER MODE =====
 function renderPokerMode() {
+  const me = state.players.find(p => p.id === state.yourId);
   const myIdx = state.players.findIndex(p => p.id === state.yourId);
-  const myTurn = myIdx === state.currentPlayerIdx && state.players[myIdx]?.alive;
+  const myTurn = myIdx === state.currentPlayerIdx && me && me.alive;
+
   const pa = $('poker-hand-area');
   pa.innerHTML = '';
   const myHand = state.yourHand || [];
@@ -632,14 +480,31 @@ function renderPokerMode() {
   pa.appendChild(lbl);
   const tray = document.createElement('div');
   tray.className = 'poker-tray';
-  for (const c of myHand) tray.appendChild(makePokerCard(c));
+  if (myHand.length === 0 && me && me.alive) {
+    const empty = document.createElement('div');
+    empty.className = 'hand-empty';
+    empty.textContent = 'Hand empty — you must call LIAR.';
+    tray.appendChild(empty);
+  }
+  for (let i = 0; i < myHand.length; i++) {
+    const card = myHand[i];
+    const selected = selectedCards.has(i);
+    const div = makePokerCard(card, { selected, disabled: !myTurn });
+    div.onclick = () => {
+      if (!myTurn) return;
+      if (selectedCards.has(i)) selectedCards.delete(i);
+      else if (selectedCards.size < 3) selectedCards.add(i);
+      else toast('Max 3 cards.');
+      renderPokerMode();
+    };
+    tray.appendChild(div);
+  }
   pa.appendChild(tray);
 
-  if (myTurn && (!$('decl-rank').options.length || $('decl-rank').disabled)) {
-    updatePokerRankOptions();
-  }
-  if (myTurn) setDefaultPokerDeclaration();
-  updatePokerButtons();
+  const canPlay = myTurn && selectedCards.size > 0 && selectedCards.size <= 3 && myHand.length > 0;
+  const canLiar = myTurn && state.lastPlayedCount > 0 && state.lastActorIdx !== null;
+  $('btn-play-poker').disabled = !canPlay;
+  $('btn-liar-poker').disabled = !canLiar;
 }
 
 let _lastLogTime = 0;
@@ -889,25 +754,15 @@ function showReveal(data) {
   } else if (data.mode === 'poker') {
     const summary = document.createElement('div');
     summary.className = 'reveal-summary';
-    summary.innerHTML = `Declaration: <b>${formatDeclaration(data.type, data.rank)}</b>`;
+    summary.innerHTML = `Target rank: <b>${rankName(data.targetRank)}</b>`;
     body.appendChild(summary);
-    const grid = document.createElement('div');
-    grid.className = 'reveal-hands-grid';
-    for (const pdata of data.allHands) {
-      const block = document.createElement('div');
-      block.className = 'reveal-player-block';
-      const nm = document.createElement('div');
-      nm.className = 'rev-name';
-      nm.textContent = pdata.name;
-      block.appendChild(nm);
-      const tray = document.createElement('div');
-      tray.className = 'poker-tray small';
-      for (const c of pdata.hand) tray.appendChild(makePokerCard(c, { flipped: true }));
-      block.appendChild(tray);
-      grid.appendChild(block);
-    }
-    body.appendChild(grid);
-    $('reveal-verdict').textContent = data.exists ? 'Hand exists in pool — truthful.' : 'Hand not in pool — LIE.';
+    const row = document.createElement('div');
+    row.className = 'reveal-cards-row';
+    for (const c of data.cards) row.appendChild(makePokerCard(c, { disabled: true, flipped: true }));
+    body.appendChild(row);
+    $('reveal-verdict').textContent = data.truthful
+      ? `All ${rankName(data.targetRank)}s or Jokers — truthful.`
+      : `Not all ${rankName(data.targetRank)}s — LIE.`;
   }
 
   overlay.style.display = 'flex';
@@ -930,5 +785,4 @@ function showShot(data) {
 }
 
 // initialize controls
-updatePokerRankOptions();
 renderDiceControls();
