@@ -1373,17 +1373,112 @@ button.small { font-size: 0.85rem; padding: 0.4rem 0.8rem; }
 /* ───────────── GAME ACTIONS ───────────── */
 .game-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
   justify-content: center;
   align-items: stretch;
   flex-wrap: wrap;
-  margin-bottom: 0.8rem;
+  margin: 0 auto 0.8rem;
+  padding: 0.4rem 0;
+  width: 100%;
+  max-width: 720px;
 }
 .game-actions button.primary,
-.game-actions button.danger {
-  min-width: 140px;
+.game-actions button.danger,
+.game-actions button.special {
+  min-width: 150px;
   padding: 0.8rem 1.2rem;
   font-size: 0.95rem;
+  letter-spacing: 0.08em;
+}
+
+/* ───────────── TURN VISIBILITY ───────────── */
+@keyframes panelIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes panelFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+body.my-turn #hand-area,
+body.my-turn #poker-hand-area,
+body.my-turn #dice-area,
+body.my-turn .bid-controls,
+body.my-turn .game-actions {
+  animation: panelIn 0.35s ease-out;
+}
+
+body.spectating #hand-area,
+body.spectating #poker-hand-area,
+body.spectating #dice-area,
+body.spectating .bid-controls,
+body.spectating .game-actions {
+  display: none !important;
+}
+
+.waiting-indicator {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.6rem 1rem;
+  margin: 0 auto 0.8rem;
+  background: linear-gradient(180deg, rgba(45, 24, 16, 0.55), rgba(20, 10, 5, 0.35));
+  border: 1px dashed rgba(107, 68, 35, 0.55);
+  border-radius: 8px;
+  min-height: 130px;
+  max-width: 720px;
+  animation: panelFade 0.35s ease-out;
+}
+body.spectating .waiting-indicator { display: flex; }
+
+.waiting-pulse {
+  display: inline-flex;
+  gap: 8px;
+  margin-bottom: 0.8rem;
+}
+.waiting-pulse .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--gold);
+  opacity: 0.4;
+  animation: waitDot 1.4s ease-in-out infinite;
+}
+.waiting-pulse .dot:nth-child(2) { animation-delay: 0.2s; }
+.waiting-pulse .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes waitDot {
+  0%, 100% { opacity: 0.25; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.waiting-label {
+  color: var(--cream);
+  font-style: italic;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+.waiting-name {
+  color: var(--gold-bright);
+  font-weight: bold;
+  font-style: normal;
+  text-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+}
+
+/* Make the turn-info more prominent when it's actually your turn */
+body.my-turn .turn-info {
+  color: var(--gold-bright);
+  font-weight: bold;
+  font-style: normal;
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  letter-spacing: 0.08em;
+  animation: turnPulse 1.4s ease-in-out infinite;
+}
+@keyframes turnPulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
 }
 
 /* ───────────── DICE (SPRITE) ───────────── */

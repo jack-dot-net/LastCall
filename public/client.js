@@ -21,6 +21,10 @@ function showScreen(name) {
   for (const s of ['menu', 'lobby', 'game', 'gameover']) {
     $('screen-' + s).classList.toggle('active', s === name);
   }
+  if (name !== 'game') {
+    document.body.classList.remove('my-turn');
+    document.body.classList.remove('spectating');
+  }
 }
 function toast(msg, ms = 2400) {
   const el = $('toast');
@@ -266,6 +270,10 @@ socket.on('shot', (data) => showShot(data));
 
 function render() {
   if (!state) return;
+  if (state.state !== 'playing') {
+    document.body.classList.remove('my-turn');
+    document.body.classList.remove('spectating');
+  }
   if (state.state === 'lobby') { showScreen('lobby'); renderLobby(); }
   else if (state.state === 'playing') { showScreen('game'); renderGame(); }
   else if (state.state === 'finished') { showScreen('gameover'); renderGameOver(); }
@@ -304,6 +312,13 @@ function renderGame() {
   $('game-cards').style.display = state.gameMode === 'cards' ? 'block' : 'none';
   $('game-dice').style.display = state.gameMode === 'dice' ? 'block' : 'none';
   $('game-poker').style.display = state.gameMode === 'poker' ? 'block' : 'none';
+
+  // Body class: are you the active player?
+  const meForTurn = state.players.find(p => p.id === state.yourId);
+  const myIdxForTurn = state.players.findIndex(p => p.id === state.yourId);
+  const myTurnFlag = myIdxForTurn === state.currentPlayerIdx && meForTurn && meForTurn.alive && !state.resolving;
+  document.body.classList.toggle('my-turn', !!myTurnFlag);
+  document.body.classList.toggle('spectating', !myTurnFlag);
 
   renderPlayers();
   renderCenter();
@@ -402,6 +417,9 @@ function renderCenter() {
   $('turn-info').textContent = current
     ? (myTurn ? 'Your turn.' : `Waiting for ${current.name}…`)
     : '';
+
+  const wpName = $('waiting-player');
+  if (wpName) wpName.textContent = current ? current.name : 'the table';
 }
 
 // ===== CARDS MODE =====
