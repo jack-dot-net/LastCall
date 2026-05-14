@@ -1,9 +1,11 @@
 import {
+  BELL_TIMEOUT_MS,
   CHAMBERS,
   LIVES_MAX,
   LIVES_MIN,
   PLAYER_MAX,
   PLAYER_MIN,
+  TURN_TIMEOUT_MS,
   type Card,
   type CreateLobbyPayload,
   type GameEvent,
@@ -47,6 +49,8 @@ interface InternalGameState {
   bell: BellRoll | null;
   winnerId: string | null;
   pendingNextStarterSeat: number | null;
+  /** ms since epoch — when the current actor must have acted by. */
+  turnDeadline: number | null;
 }
 
 export interface ActionOutcome {
@@ -291,6 +295,7 @@ export class Lobby {
       bell: null,
       winnerId: null,
       pendingNextStarterSeat: null,
+      turnDeadline: null,
     };
     const events: GameEvent[] = [
       {
@@ -338,6 +343,7 @@ export class Lobby {
       rank: this.game.currentRank,
       round: this.game.round,
     });
+    this.refreshDeadline();
   }
 
   // ============================================================
@@ -394,6 +400,7 @@ export class Lobby {
         ts: Date.now(),
       },
     ];
+    this.refreshDeadline();
     return { ok: true, events, handsToPush: [s.id], changed: true };
   }
 
@@ -436,6 +443,7 @@ export class Lobby {
     // The bell loser starts the next round (if they survive). If they're
     // eliminated, the round will fall through to the next alive seat.
     this.game.pendingNextStarterSeat = loserSeat;
+    this.refreshDeadline();
 
     return { ok: true, events, handsToPush: [], changed: true };
   }
@@ -453,6 +461,7 @@ export class Lobby {
     if (this.game.bell) return fail('Already pulled.');
     const events: GameEvent[] = [];
     this.resolveBell(s.seat, /*forceRing*/ false, events);
+    this.refreshDeadline();
     return { ok: true, events, handsToPush: [], changed: true };
   }
 
@@ -476,6 +485,7 @@ export class Lobby {
       this.game.phase = 'match_end';
       this.game.winnerId = winner?.id ?? null;
       if (winner) events.push({ type: 'matchEnd', winnerSeat: winner.seat });
+      this.refreshDeadline();
       return { ok: true, events, handsToPush: [], changed: true };
     }
 
@@ -486,6 +496,7 @@ export class Lobby {
     );
     events.push({ type: 'roundEnd', aliveSeats: alive });
     this.beginRound(nextStart, events);
+    // beginRound already calls refreshDeadline.
     return { ok: true, events, handsToPush: this.aliveSeatIds(), changed: true };
   }
 
@@ -579,6 +590,91 @@ export class Lobby {
     return this.nextAliveSeatAfter(seat);
   }
 
+  /**
+   * Recompute when the current actor must act by. Called after every
+   * phase / turn transition. Returns the deadline so callers can also
+   * use it to schedule timeouts.
+   */
+  private refreshDeadline(): number | null {
+    if (!this.game) return null;
+    if (this.game.phase === 'declare' || this.game.phase === 'decision') {
+      this.game.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+    } else if (this.game.phase === 'bell' && !this.game.bell) {
+      this.game.turnDeadline = Date.now() + BELL_TIMEOUT_MS;
+    } else {
+      this.game.turnDeadline = null;
+    }
+    return this.game.turnDeadline;
+  }
+
+  /**
+   * Server-driven timeout action. Called when `turnDeadline` passes
+   * without the current actor making a move. Picks the cheapest sensible
+   * action so AFK players don't stall the game.
+   *
+   * declare / decision phase:
+   *   - 0 cards in hand → call LIAR (only valid action)
+   *   - otherwise        → play 1-3 cards, preferring matching/wild so the
+   *                         AFK player is less likely to be caught lying
+   * bell phase:
+   *   - pull the rope (random chamber roll)
+   */
+  autoTurnAction(seat: number): ActionOutcome {
+    if (!this.game) return fail('Game not started.');
+    if (this.game.turnSeat !== seat) {
+      return { ok: true, events: [], handsToPush: [], changed: false };
+    }
+    const player = this.playerBySeat(seat);
+    if (!player) return fail('No player at seat.');
+    const events: GameEvent[] = [
+      {
+        type: 'log',
+        text: `${player.name} timed out.`,
+        ts: Date.now(),
+      },
+    ];
+
+    if (this.game.phase === 'bell') {
+      const out = this.pullBell(player.id);
+      return { ...out, events: [...events, ...out.events] };
+    }
+    if (this.game.phase === 'decision' || this.game.phase === 'declare') {
+      if (player.hand.length === 0) {
+        if (this.game.phase !== 'decision') {
+          // No cards and no chain to challenge — shouldn't happen.
+          return fail('Cannot auto-act in declare phase with no cards.');
+        }
+        const out = this.callLiar(player.id);
+        return { ...out, events: [...events, ...out.events] };
+      }
+      // Pick 1-3 cards, prefer matching the call (incl. wild).
+      const rank = this.game.currentRank;
+      const matching = player.hand.filter(
+        (c) => c.suit === rank || c.suit === 'wild'
+      );
+      const desired = Math.min(
+        player.hand.length,
+        1 + Math.floor(Math.random() * 3)
+      );
+      let chosen: Card[];
+      if (matching.length >= desired) {
+        chosen = matching.slice(0, desired);
+      } else if (matching.length > 0) {
+        const rest = player.hand.filter((c) => !matching.includes(c));
+        chosen = [...matching, ...rest.slice(0, desired - matching.length)];
+      } else {
+        // No matches — forced to lie. Play just 1 to minimise risk.
+        chosen = [player.hand[0]];
+      }
+      const out = this.play(
+        player.id,
+        chosen.map((c) => c.id)
+      );
+      return { ...out, events: [...events, ...out.events] };
+    }
+    return fail('No auto-action for current phase.');
+  }
+
 
   // ============================================================
   // Views
@@ -658,6 +754,7 @@ export class Lobby {
         bell: this.game.bell,
         winnerId: this.game.winnerId,
         aliveSeats: this.aliveSeats(),
+        turnDeadline: this.game.turnDeadline,
       };
     }
 

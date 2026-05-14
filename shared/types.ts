@@ -68,7 +68,17 @@ export interface PublicGameState {
   winnerId: string | null;
   /** Seat indexes in turn order, alive only. */
   aliveSeats: number[];
+  /**
+   * Absolute timestamp (ms since epoch) by which the player on `turnSeat`
+   * must act. The server auto-plays / auto-pulls when this passes. `null`
+   * when no timer is active (e.g. match end, between rounds).
+   */
+  turnDeadline: number | null;
 }
+
+/** Server enforces these — clients render them for visual countdown. */
+export const TURN_TIMEOUT_MS = 20_000;
+export const BELL_TIMEOUT_MS = 5_000;
 
 export interface Lobby {
   code: string;

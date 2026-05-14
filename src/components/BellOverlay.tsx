@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import type { BellRoll, PublicPlayer } from '@shared/types';
 import { CHAMBERS } from '@shared/types';
 import { Icon } from './primitives';
+import { useCountdown } from '../lib/useCountdown';
 
 type Phase = 'idle' | 'spinning' | 'result';
 
@@ -10,15 +11,20 @@ export function BellOverlay({
   player,
   isYou,
   result,
+  deadline,
   onPull,
 }: {
   player: PublicPlayer;
   isYou: boolean;
   /** Latest bell roll, or null if not pulled yet. */
   result: BellRoll | null;
+  /** Server auto-pull deadline (ms since epoch), or null. */
+  deadline: number | null;
   onPull: () => void;
 }) {
   const [phase, setPhase] = useState<Phase>('idle');
+  const remainingMs = useCountdown(phase === 'idle' ? deadline : null);
+  const remainingSec = Math.ceil(remainingMs / 1000);
 
   // When result arrives, run spin → result animation.
   useEffect(() => {
@@ -98,20 +104,43 @@ export function BellOverlay({
 
         <div style={{ minHeight: 96, display: 'grid', placeItems: 'center' }}>
           {phase === 'idle' && (
-            <button
-              className="btn danger"
-              style={{ fontSize: 16, padding: '16px 32px' }}
-              onClick={onPull}
-              disabled={!isYou}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 10,
+              }}
             >
-              {isYou ? (
-                <>
-                  <Icon name="fire" /> Pull the Rope
-                </>
-              ) : (
-                `${player.name} is pulling…`
+              <button
+                className="btn danger"
+                style={{ fontSize: 16, padding: '16px 32px' }}
+                onClick={onPull}
+                disabled={!isYou}
+              >
+                {isYou ? (
+                  <>
+                    <Icon name="fire" /> Pull the Rope
+                    {deadline ? ` · ${remainingSec}s` : ''}
+                  </>
+                ) : (
+                  `${player.name} is pulling…${deadline ? ` (${remainingSec}s)` : ''}`
+                )}
+              </button>
+              {isYou && deadline && remainingSec <= 3 && (
+                <div
+                  className="mono"
+                  style={{
+                    color: 'var(--ember)',
+                    letterSpacing: '.22em',
+                    textTransform: 'uppercase',
+                    fontSize: 10,
+                  }}
+                >
+                  House will pull for you
+                </div>
               )}
-            </button>
+            </div>
           )}
           {phase === 'spinning' && (
             <div

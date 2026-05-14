@@ -40,6 +40,8 @@ export interface AppContext {
   lobbies: LobbyManager;
   store: JsonStore;
   rateLimits: Map<string, RateLimitState>;
+  /** Per-lobby turn / bell auto-action timer. */
+  turnTimers: Map<string, NodeJS.Timeout>;
 }
 
 export function createContext(io: IO, store: JsonStore): AppContext {
@@ -49,6 +51,7 @@ export function createContext(io: IO, store: JsonStore): AppContext {
     lobbies: new LobbyManager(),
     store,
     rateLimits: new Map(),
+    turnTimers: new Map(),
   };
 }
 
@@ -215,6 +218,7 @@ function bindSocket(ctx: AppContext, socket: IOSocket): void {
     emitEvents(ctx, lobby, outcome.events);
     for (const id of outcome.handsToPush) emitHand(ctx, lobby, id);
     broadcastLobbyList(ctx);
+    scheduleTurnTimer(ctx, lobby);
     ack({ ok: true });
   });
 
@@ -267,6 +271,7 @@ function bindSocket(ctx: AppContext, socket: IOSocket): void {
     emitLobbyState(ctx, lobby);
     emitEvents(ctx, lobby, outcome.events);
     for (const id of outcome.handsToPush) emitHand(ctx, lobby, id);
+    scheduleTurnTimer(ctx, lobby);
     ack({ ok: true });
   });
 
@@ -287,6 +292,7 @@ function bindSocket(ctx: AppContext, socket: IOSocket): void {
     emitEvents(ctx, lobby, outcome.events);
     for (const id of outcome.handsToPush) emitHand(ctx, lobby, id);
     if (lobby.game?.phase === 'match_end') recordMatch(ctx, lobby);
+    scheduleTurnTimer(ctx, lobby);
     ack({ ok: true });
   });
 
@@ -305,19 +311,12 @@ function bindSocket(ctx: AppContext, socket: IOSocket): void {
     }
     emitLobbyState(ctx, lobby);
     emitEvents(ctx, lobby, outcome.events);
+    // pullBell sets bell.* on the state, so the bell auto-pull timer is no
+    // longer needed. The post-bell advance handler will reschedule for the
+    // next turn after it transitions out of the bell phase.
+    clearTurnTimer(ctx, lobby.code);
+    schedulePostBellAdvance(ctx, lobby);
     ack({ ok: true });
-    // After a brief pause for the result animation, advance to the next round.
-    setTimeout(() => {
-      const advance = lobby.advanceAfterBell();
-      if (!advance.changed) return;
-      emitLobbyState(ctx, lobby);
-      emitEvents(ctx, lobby, advance.events);
-      for (const id of advance.handsToPush) emitHand(ctx, lobby, id);
-      if (lobby.game?.phase === 'match_end') {
-        recordMatch(ctx, lobby);
-        broadcastLobbyList(ctx);
-      }
-    }, 2400).unref?.();
   });
 
   socket.on('game:react', (payload) => {
@@ -394,6 +393,87 @@ function emitEvents(ctx: AppContext, lobby: Lobby, events: GameEvent[]): void {
   }
 }
 
+function clearTurnTimer(ctx: AppContext, code: string): void {
+  const t = ctx.turnTimers.get(code);
+  if (t) {
+    clearTimeout(t);
+    ctx.turnTimers.delete(code);
+  }
+}
+
+/**
+ * Schedules the auto-action timer for a lobby based on its game state's
+ * `turnDeadline`. Clears any prior timer first.
+ *
+ * When the timer fires, asks the Lobby to take an auto-action for the
+ * current turn (auto-play, auto-LIAR, or auto-pull bell), broadcasts the
+ * result, then reschedules for the new turn.
+ */
+function scheduleTurnTimer(ctx: AppContext, lobby: Lobby): void {
+  clearTurnTimer(ctx, lobby.code);
+  const deadline = lobby.game?.turnDeadline;
+  if (deadline == null) return;
+  const remaining = Math.max(0, deadline - Date.now());
+  const seatAtSchedule = lobby.game!.turnSeat;
+  const phaseAtSchedule = lobby.game!.phase;
+  const handle = setTimeout(() => {
+    ctx.turnTimers.delete(lobby.code);
+    // Confirm the game state hasn't moved on between when we scheduled and
+    // when we fired — otherwise we'd be auto-acting on a stale turn.
+    const game = lobby.game;
+    if (!game) return;
+    if (game.phase !== phaseAtSchedule || game.turnSeat !== seatAtSchedule) {
+      // State already advanced; reschedule for whatever is current.
+      scheduleTurnTimer(ctx, lobby);
+      return;
+    }
+    const outcome = lobby.autoTurnAction(seatAtSchedule);
+    if (!outcome.ok) {
+      log.warn('auto-action failed:', outcome.error);
+      // Try to reschedule anyway so the game doesn't stall.
+      scheduleTurnTimer(ctx, lobby);
+      return;
+    }
+    if (!outcome.changed) {
+      scheduleTurnTimer(ctx, lobby);
+      return;
+    }
+    emitLobbyState(ctx, lobby);
+    emitEvents(ctx, lobby, outcome.events);
+    for (const id of outcome.handsToPush) emitHand(ctx, lobby, id);
+    // If the auto-action transitioned to bell, we need to schedule the
+    // post-pull advance the same way the human pull handler does.
+    if (lobby.game?.phase === 'bell' && lobby.game.bell) {
+      schedulePostBellAdvance(ctx, lobby);
+    }
+    if (lobby.game?.phase === 'match_end') {
+      recordMatch(ctx, lobby);
+      broadcastLobbyList(ctx);
+    }
+    scheduleTurnTimer(ctx, lobby);
+  }, remaining);
+  // unref so node can exit if this is the only thing pending.
+  handle.unref?.();
+  ctx.turnTimers.set(lobby.code, handle);
+}
+
+const BELL_ADVANCE_DELAY_MS = 2_400;
+
+function schedulePostBellAdvance(ctx: AppContext, lobby: Lobby): void {
+  setTimeout(() => {
+    const advance = lobby.advanceAfterBell();
+    if (!advance.changed) return;
+    emitLobbyState(ctx, lobby);
+    emitEvents(ctx, lobby, advance.events);
+    for (const id of advance.handsToPush) emitHand(ctx, lobby, id);
+    if (lobby.game?.phase === 'match_end') {
+      recordMatch(ctx, lobby);
+      broadcastLobbyList(ctx);
+    }
+    scheduleTurnTimer(ctx, lobby);
+  }, BELL_ADVANCE_DELAY_MS).unref?.();
+}
+
 function pushSystemChat(ctx: AppContext, lobby: Lobby, text: string): void {
   ctx.io.to(lobby.code).emit('chat:message', {
     id: generateEventId(),
@@ -418,10 +498,17 @@ function leaveLobby(
   const result = lobby.removePlayer(session.id);
   if (result.closed) {
     ctx.io.to(lobby.code).emit('lobby:closed', { reason: 'Lobby closed.' });
+    clearTurnTimer(ctx, lobby.code);
     ctx.lobbies.close(lobby.code);
   } else {
     emitLobbyState(ctx, lobby);
     emitEvents(ctx, lobby, result.events);
+    // The departure may have advanced the turn (e.g. they were the active
+    // seat). Reschedule based on whatever state the lobby settled into.
+    scheduleTurnTimer(ctx, lobby);
+    if (lobby.game?.phase === 'match_end') {
+      recordMatch(ctx, lobby);
+    }
   }
   // Also leave the socket.io room.
   if (session.socketId) {

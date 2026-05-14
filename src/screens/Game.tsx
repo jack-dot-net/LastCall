@@ -5,6 +5,7 @@ import { Chip, Icon, avatarInitial } from '../components/primitives';
 import { GameCard } from '../components/Card';
 import { BellOverlay } from '../components/BellOverlay';
 import { getSocket } from '../lib/socket';
+import { useCountdown } from '../lib/useCountdown';
 import type { Card, PublicPlayer } from '@shared/types';
 
 const REACTIONS = ['😏', '😱', '🥃', '🤥', '🎯'];
@@ -44,6 +45,11 @@ export function Game() {
   const lastPlayer = game.lastPlay
     ? lobby.players.find((p) => p.seat === game.lastPlay!.fromSeat)
     : null;
+
+  // Countdown timers — server enforces these via auto-actions; we render
+  // them locally so the player can see the pressure.
+  const remainingMs = useCountdown(turnIsMine ? game.turnDeadline ?? null : null);
+  const remainingSec = Math.ceil(remainingMs / 1000);
   const bellPlayer =
     game.phase === 'bell'
       ? lobby.players.find((p) => p.seat === game.turnSeat) ?? null
@@ -406,10 +412,10 @@ export function Game() {
               }}
             >
               {mustCallLiar
-                ? "No cards left — call LIAR"
+                ? `No cards left — call LIAR · ${remainingSec}s`
                 : inDeclare
-                ? `Open the round · 1–3 ${game.currentRank}`
-                : `Play 1–3 ${game.currentRank} or call LIAR`}
+                ? `Open the round · 1–3 ${game.currentRank} · ${remainingSec}s`
+                : `Play 1–3 ${game.currentRank} or call LIAR · ${remainingSec}s`}
             </motion.div>
           )}
         </AnimatePresence>
@@ -555,6 +561,7 @@ export function Game() {
               player={bellPlayer}
               isYou={isYourBell}
               result={game.bell}
+              deadline={isYourBell ? game.turnDeadline ?? null : null}
               onPull={pullBell}
             />
           )}
