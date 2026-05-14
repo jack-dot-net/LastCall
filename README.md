@@ -1,128 +1,163 @@
 # Last Call
 
-Last Call is an original online multiplayer bluffing game for up to 8 players. It is inspired by tense social deduction tavern games, but uses original branding, visuals, rules, UI, and implementation.
+An original online multiplayer bluffing bar game for up to 8 players. Inspired by tense social-deduction tavern games — rebuilt from scratch with original branding, rules, UI, and implementation.
 
-## Features
+> Deal five cards. Claim the call. Bluff or play it straight. Get called out, and you're pulling **The Bell** — six chambers, Russian-roulette odds, one chamber that costs you a life. Last drinker standing closes the bar.
 
-- Online multiplayer lobbies with unique 5-character game codes
-- Real-time Socket.io synchronization
-- Up to 8 players per lobby
-- Host migration when the host leaves
-- Ready/unready lobby flow
-- Server-authoritative hands, turns, claims, challenges, life totals, and win checks
-- Duplicate-name, invalid-code, full-lobby, invalid-action, and out-of-turn validation
-- Reconnect tokens stored locally, with mid-game grace handling
-- Premium dark tavern/casino UI with responsive desktop and mobile layouts
-- Local settings panel with iOS-style toggles
-- Render.com-ready Express deployment
+## Stack
 
-## Local Setup
+- **Frontend**: React 18 + TypeScript + Vite + TailwindCSS + Framer Motion + Zustand
+- **Backend**: Node.js + Express + Socket.IO (server-authoritative game engine, TypeScript via tsx)
+- **Persistence**: JSON files only (match history under `./data/state.json`) — no database
+- **Deploy**: Render.com (Blueprint) or Docker
+
+## Quick Start (local)
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open http://localhost:5173.
 
-On Windows PowerShell, if `npm` is blocked by script policy, use:
+The Vite dev server runs on `:5173` and proxies `/socket.io` and `/api` to the backend on `:3001`. Both processes are started by the single `npm run dev` script (concurrent).
 
-```bash
-npm.cmd install
-npm.cmd run dev
-```
+To simulate multiple players locally, open two browser tabs (or browsers) — each gets its own session. Reconnect tokens are stored per-browser in `localStorage`.
 
-## Production Start
+## Production Build
 
 ```bash
-npm start
+npm run build       # bundles client to ./dist
+npm start           # serves client + Socket.IO on $PORT (default 3001)
 ```
 
-The server binds to `process.env.PORT` and serves the static frontend from `public/`.
+## Environment Variables
 
-## Render.com Deployment
+Copy `.env.example` to `.env` and edit as needed. All are optional.
 
-This repository includes `render.yaml`.
+| Variable       | Default                  | Notes                                            |
+|----------------|--------------------------|--------------------------------------------------|
+| `PORT`         | `3001`                   | Render injects this automatically                |
+| `NODE_ENV`     | `development`            | Set `production` to enable static client serving |
+| `CORS_ORIGINS` | `http://localhost:5173`  | Comma-separated; dev only                        |
+| `DATA_DIR`     | `./data`                 | Where `state.json` is written                    |
 
-1. Create a new Blueprint on Render.
-2. Point it at this repository.
-3. Render will run `npm install`.
-4. Render will start the service with `npm start`.
+## Deploy to Render.com
 
-Required environment variables:
+This repo ships a Render Blueprint (`render.yaml`).
 
-- `PORT`: provided automatically by Render
-- `NODE_ENV`: optional, set to `production` if desired
+1. Push the repo to GitHub.
+2. In Render, create a new **Blueprint** and point it at the repo.
+3. Render will:
+   - Run `npm install && npm run build`
+   - Start `npm start`
+   - Health-check `/api/health`
+4. Socket.IO works over the same web service — no extra config needed.
 
-Socket.io runs on the same Express web service, so WebSockets work through Render's normal web service routing.
+Free tier note: instances spin down after idleness. The first reconnect after wake takes a few seconds.
 
-## Gameplay Rules
+## Docker
 
-1. Create a game and share the lobby code, or join an existing game with a code.
-2. Everyone readies up. The host starts the game.
-3. Each player begins with 3 lives.
-4. Each round deals 5 hidden cards to every surviving player.
-5. The table names a claim rank: `Crows`, `Moons`, or `Keys`.
-6. On your turn, play 1-3 cards face down and claim they match the round rank.
-7. `Ember` cards are wild and count as any rank.
-8. The next player can either make their own claim or call bluff.
-9. If the revealed cards all match, the caller loses a life.
-10. If any revealed card fails, the bluffer loses a life.
-11. Players with 0 lives become spectators.
-12. The last surviving player wins.
+```bash
+docker build -t last-call .
+docker run --rm -p 3001:3001 -e NODE_ENV=production last-call
+```
+
+## Gameplay
+
+1. **Create or join a lobby.** Lobby codes are 6 characters (e.g. `EMBR42`). Up to 8 seats.
+2. **Ready up.** The host starts the round once everyone is ready (minimum 2 players).
+3. **The call.** Each round names a rank — **Whiskey**, **Gin**, or **Rum**.
+4. **Play.** On your turn, play 1–3 cards face down and claim they all match the call.
+   - **Wild** cards count as any rank.
+5. **The next player decides.** Trust the play, or shout **LIAR!**
+   - **Trust** → previous play's cards stay played, player refills hand to 5, *you* must now play.
+   - **Challenge** → cards are revealed. If any card isn't the call (and isn't wild), the *bluffer* loses. Otherwise the *challenger* loses.
+6. **The Bell.** The loser pulls the bell rope. Six chambers, escalating odds:
+   - 1st pull after a fresh reset: 1/6 ring chance
+   - Each safe pull advances the chamber, so the 6th is guaranteed
+   - On a ring, the puller loses a life and the chambers reset
+7. **Lose all your lives → spectator.** The last surviving player wins.
 
 ## Controls
 
-- `Create Game`: starts a new lobby and generates a code
-- `Join Game`: joins an existing lobby by code
-- `Ready` / `Unready`: toggles lobby readiness
-- `Start Game`: host-only, enabled when the lobby is ready
-- Card click/tap: selects or deselects a card
-- `Play Selected`: submits 1-3 selected cards as the current rank
-- `Call Bluff`: challenges the previous claim
-- `Settings`: opens local UI/game preferences
+- **Click / tap** a card to select (up to 3). Selected cards lift.
+- **Play** sends them to the pile under the current call.
+- **LIAR!** challenges the previous play.
+- **Trust** accepts the play and forces you to declare next.
+- **Pull the Rope** triggers your bell pull.
+- **Reaction emojis** float above your seat for other players to see.
+- **Chat** is available in the lobby (lobby room) and event log (in-game).
+
+## Multiplayer & networking
+
+- Server-authoritative game state — clients never compute lying, life loss, or bell odds locally.
+- Reconnect tokens persist per-browser in `localStorage`. If you refresh or briefly lose connection, you'll rejoin your seat for up to 60 seconds.
+- Host migration: if the host leaves, the next seated player becomes host.
+- Mid-game departures are treated as eliminations; the round advances automatically.
+- Rate limiting on chat, lobby create/join, and reactions prevents trivial spam.
 
 ## Settings
 
-Settings are saved in `localStorage` and apply immediately where possible.
+Stored in `localStorage`, applied immediately:
 
-- Sound effects
-- Music preference
-- Reduced motion
-- Fullscreen mode
-- Action log visibility
-- Cinematic dark mode
+- Master audio + per-channel volume sliders (music / ambient / SFX)
+- Bloom & smoke atmospheric layers
+- Reduced motion (disables transitions)
+- "Confirm before playing" guard
+- Haptic-style feedback (visual flashes on touch)
 
 ## Project Structure
 
-```text
+```
 .
-├── server.js          # Express, Socket.io, room management, authoritative game engine
-├── public/
-│   ├── index.html     # App shell and accessible UI structure
-│   ├── client.js      # Socket client, rendering, settings, interactions
-│   └── style.css      # Responsive cinematic tavern/casino visual system
-├── package.json       # Scripts and dependencies
-├── render.yaml        # Render Blueprint
-└── README.md
+├── index.html              # Vite entry
+├── vite.config.ts          # Dev server + /socket.io proxy
+├── package.json            # Single root package
+├── tsconfig.json           # Client TS config
+├── tsconfig.server.json    # Server TS check config
+├── tailwind.config.ts
+├── postcss.config.js
+├── render.yaml             # Render Blueprint
+├── Dockerfile
+├── shared/
+│   └── types.ts            # Wire protocol shared by client+server
+├── server/
+│   ├── index.ts            # Express + Socket.IO + static serving
+│   ├── game/
+│   │   ├── deck.ts         # Deck, shuffle, dealing
+│   │   ├── lobby.ts        # Lobby + authoritative game engine
+│   │   └── sessions.ts     # Player sessions + reconnect tokens
+│   ├── socket/handlers.ts  # All socket.io event handlers
+│   ├── persistence/store.ts # JSON file persistence
+│   └── util/{codes,log}.ts
+└── src/                    # React app
+    ├── main.tsx
+    ├── App.tsx             # Socket wiring, routing, modal/toast host
+    ├── index.css / styles.css
+    ├── lib/socket.ts       # Singleton socket.io-client + auth
+    ├── store/game.ts       # Zustand global store
+    ├── components/         # Atmosphere, Modal, Toast, Card, BellOverlay, primitives
+    └── screens/            # Menu, LobbyBrowser, CreateLobby, JoinByCode, LobbyRoom, Game, Settings
 ```
 
-## Quality Checks
+## Known limitations
 
-Run:
+- Match state is in-memory; if the server restarts mid-game, lobbies are lost (clients return to the menu).
+- No spectate-from-outside: spectator mode is automatic only for eliminated players inside a match.
+- Audio toggles + volume sliders persist preferences but the design ships without bundled audio assets — drop your own files into `public/sfx/` and wire them up if desired.
+- Render free tier sleeps after ~15 minutes idle. Players reconnecting after wake will see a brief loading screen.
 
-```bash
-npm test
-```
+## Scripts
 
-Manual verification performed during implementation:
+| Command          | What it does                                     |
+|------------------|--------------------------------------------------|
+| `npm run dev`    | Vite + Socket.IO server concurrently             |
+| `npm run build`  | Bundle client to `./dist`                        |
+| `npm start`      | Run production server (serves `./dist`)          |
+| `npm run typecheck` | Strict TS check across client and server      |
+| `npm run preview` | Vite preview server for the built client only   |
 
-- Local server start on a test port
-- Browser load of the menu and lobby with no console errors
-- Socket.io multiplayer simulation covering create, join, ready, start, play, challenge, reveal, and state sync
+## License
 
-## Known Limitations
-
-- Lobby and game state are in memory, so active games reset when the server restarts.
-- Reconnect is best-effort and depends on the same browser retaining its local reconnect token.
-- Voice/video chat is not included; players should use an external call if they want live table talk.
+Original work. All names, art directions, and code in this repo are original — no third-party game assets, branding, or copyrighted mechanics are reused.
