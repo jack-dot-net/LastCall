@@ -1,19 +1,41 @@
 {
   "name": "last-call",
   "version": "1.0.0",
-  "description": "Last Call: an original online multiplayer bluffing game",
-  "main": "server.js",
+  "private": true,
+  "description": "Last Call — an original online multiplayer bluffing bar game",
+  "type": "module",
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js",
-    "test": "node --check server.js"
+    "dev": "concurrently -k -n CLIENT,SERVER -c blue,magenta \"vite\" \"tsx watch server/index.ts\"",
+    "build": "vite build",
+    "start": "tsx server/index.ts",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "preview": "vite preview"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "socket.io-client": "^4.7.5",
-    "socket.io": "^4.7.5"
+    "express": "^4.21.1",
+    "framer-motion": "^11.11.17",
+    "nanoid": "^5.0.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "tsx": "^4.19.2",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
   }
 }

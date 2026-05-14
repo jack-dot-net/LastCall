@@ -1,5 +1,11 @@
-node_modules/
-.env
+node_modules
+dist
+server-dist
+data
 .DS_Store
-npm-debug.log*
+.env
+.env.local
+.env.*.local
 *.log
+.vite
+.cache
