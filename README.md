@@ -63,31 +63,29 @@ docker build -t last-call .
 docker run --rm -p 3001:3001 -e NODE_ENV=production last-call
 ```
 
-## Gameplay
+## Gameplay (Liar's Bar rules)
 
 1. **Create or join a lobby.** Lobby codes are 6 characters (e.g. `EMBR42`). Up to 8 seats.
-2. **Ready up.** The host starts the round once everyone is ready (minimum 2 players).
-3. **The call.** Each round names a rank — **Whiskey**, **Gin**, or **Rum**.
-4. **Play.** On your turn, play 1–3 cards face down and claim they all match the call.
-   - **Wild** cards count as any rank.
-5. **The next player decides.** Trust the play, or shout **LIAR!**
-   - **Trust** → previous play's cards stay played, player refills hand to 5, *you* must now play.
-   - **Challenge** → cards are revealed. If any card isn't the call (and isn't wild), the *bluffer* loses. Otherwise the *challenger* loses.
-6. **The Bell.** The loser pulls the bell rope. Six chambers, escalating odds:
-   - 1st pull after a fresh reset: 1/6 ring chance
-   - Each safe pull advances the chamber, so the 6th is guaranteed
-   - On a ring, the puller loses a life and the chambers reset
-7. **Lose all your lives → spectator.** The last surviving player wins.
+2. **Ready up.** The host starts the match once everyone is ready (minimum 2 players).
+3. **The call.** Each round names a table card — **Whiskey**, **Gin**, or **Rum**.
+4. **The deal.** Every alive player gets 5 cards (kept private). Card supply: 14 of each suit + 4 **Wilds** that count as any rank.
+5. **Open the round.** The starting player (last round's bell-puller, or the seat after them if eliminated) plays **1–3 cards face down** and claims they all match the table call.
+6. **The chain.** The next player has two choices:
+   - **Play 1–3 of their own cards** — implicitly trusting the previous play. The pile keeps growing. Decision burden passes to the *next* player.
+   - **Call LIAR!** — only the *last* batch on the pile is flipped. If any of those cards isn't the call (and isn't wild), the player who played them loses. Otherwise the challenger loses.
+7. **No refills mid-round.** Cards you play this round are *gone* until the round ends. If you empty your hand, you're not eliminated — but you can only sit and watch until someone calls LIAR. If your turn to *decide* comes back around and you have zero cards, your only option is LIAR.
+8. **The Bell.** The loser pulls a six-chamber bell rope. Escalating odds: 1/6 on the first pull, 1/5 on the next safe pull, ... 1/1 on the sixth. A ring costs a life and resets the chambers; a safe pull bumps you closer to the next one.
+9. **Round over.** The bell-puller (if alive) starts the next round with a fresh deal and a new call.
+10. **Lose all your lives → spectator.** The last surviving player wins.
 
 ## Controls
 
 - **Click / tap** a card to select (up to 3). Selected cards lift.
-- **Play** sends them to the pile under the current call.
-- **LIAR!** challenges the previous play.
-- **Trust** accepts the play and forces you to declare next.
-- **Pull the Rope** triggers your bell pull.
+- **Play** commits 1–3 face-down cards under the current call. In the middle of a chain, *playing is how you trust* the previous play.
+- **LIAR!** reveals the previous play only.
+- **Pull the Rope** triggers your bell pull when you've lost the round.
 - **Reaction emojis** float above your seat for other players to see.
-- **Chat** is available in the lobby (lobby room) and event log (in-game).
+- **Chat** is available in the lobby; event log is available in-game.
 
 ## Multiplayer & networking
 

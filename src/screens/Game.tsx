@@ -32,8 +32,14 @@ export function Game() {
   if (!me) return null;
   const mySeat = me.seat;
 
-  const isYourTurn = game.turnSeat === mySeat && game.phase === 'declare';
-  const isYourDecision = game.turnSeat === mySeat && game.phase === 'decision';
+  const turnIsMine = game.turnSeat === mySeat;
+  const inDecide = game.phase === 'decision';
+  const inDeclare = game.phase === 'declare';
+  // I can act (play cards) on my turn in either declare or decision phase.
+  const canPlay = turnIsMine && (inDeclare || inDecide) && hand.length > 0 && !me.out;
+  // LIAR is only available in the decision phase (something to challenge).
+  const canCallLiar = turnIsMine && inDecide && !me.out;
+  const mustCallLiar = canCallLiar && hand.length === 0;
   const isYourBell = game.turnSeat === mySeat && game.phase === 'bell';
   const lastPlayer = game.lastPlay
     ? lobby.players.find((p) => p.seat === game.lastPlay!.fromSeat)
@@ -57,7 +63,7 @@ export function Game() {
   }
 
   function toggleSelect(cardId: number) {
-    if (!isYourTurn) return;
+    if (!canPlay) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(cardId)) next.delete(cardId);
@@ -67,7 +73,7 @@ export function Game() {
   }
 
   function playSelected() {
-    if (selected.size === 0 || !isYourTurn) return;
+    if (selected.size === 0 || !canPlay) return;
     const cards = hand.filter((c) => selected.has(c.id));
     if (useGameStore.getState().settings.confirmPlay) {
       setConfirming({ cards });
@@ -87,9 +93,9 @@ export function Game() {
     });
   }
 
-  function decide(challenge: boolean) {
-    if (!isYourDecision) return;
-    getSocket().emit('game:decide', { challenge }, (res) => {
+  function callLiar() {
+    if (!canCallLiar) return;
+    getSocket().emit('game:callLiar', (res) => {
       if (!res.ok) pushToast(res.error, 'warn');
     });
   }
@@ -375,9 +381,9 @@ export function Game() {
 
         {/* Action banner */}
         <AnimatePresence>
-          {(isYourTurn || isYourDecision) && (
+          {(canPlay || canCallLiar) && (
             <motion.div
-              key={game.phase}
+              key={`${game.phase}-${mustCallLiar ? 'forced' : 'choose'}`}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
@@ -399,9 +405,11 @@ export function Game() {
                 whiteSpace: 'nowrap',
               }}
             >
-              {isYourTurn
-                ? `Your move · play 1–3 cards as ${game.currentRank}`
-                : `Call it · trust or shout LIAR`}
+              {mustCallLiar
+                ? "No cards left — call LIAR"
+                : inDeclare
+                ? `Open the round · 1–3 ${game.currentRank}`
+                : `Play 1–3 ${game.currentRank} or call LIAR`}
             </motion.div>
           )}
         </AnimatePresence>
@@ -416,50 +424,7 @@ export function Game() {
           gap: 12,
         }}
       >
-        {isYourDecision ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 12,
-              maxWidth: 760,
-              margin: '0 auto',
-              width: '100%',
-            }}
-          >
-            <button
-              className="btn danger"
-              style={{ height: 60, fontSize: 16 }}
-              onClick={() => decide(true)}
-            >
-              <Icon name="fire" /> LIAR!
-            </button>
-            <button
-              className="btn primary"
-              style={{ height: 60, fontSize: 16 }}
-              onClick={() => decide(false)}
-            >
-              <Icon name="check" /> Trust them
-            </button>
-            <div
-              style={{
-                gridColumn: '1 / -1',
-                textAlign: 'center',
-                color: 'var(--ink-3)',
-                fontFamily: 'var(--f-mono)',
-                fontSize: 11,
-                letterSpacing: '.18em',
-                textTransform: 'uppercase',
-              }}
-            >
-              {lastPlayer?.name} played{' '}
-              <span style={{ color: 'var(--ink-1)' }}>
-                {game.lastPlay?.count} · {game.lastPlay?.claimedRank}
-              </span>
-              . Wrong call → you pull the bell.
-            </div>
-          </div>
-        ) : me.out ? (
+        {me.out ? (
           <div
             className="mono"
             style={{
@@ -492,6 +457,24 @@ export function Game() {
               <span>Selected: {selected.size}/3</span>
               <span>Pile: {game.pileSize}</span>
             </div>
+            {canCallLiar && lastPlayer && (
+              <div
+                style={{
+                  textAlign: 'center',
+                  color: 'var(--ink-2)',
+                  fontFamily: 'var(--f-mono)',
+                  fontSize: 11,
+                  letterSpacing: '.18em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {lastPlayer.name} just played{' '}
+                <span style={{ color: 'var(--ink-0)' }}>
+                  {game.lastPlay?.count} · {game.lastPlay?.claimedRank}
+                </span>
+                . Play your own or shout LIAR.
+              </div>
+            )}
             <div
               style={{
                 display: 'flex',
@@ -528,21 +511,36 @@ export function Game() {
                       padding: '40px 0',
                     }}
                   >
-                    No cards
+                    No cards left this round
                   </div>
                 )}
               </div>
-              <button
-                className="btn primary"
-                disabled={!isYourTurn || selected.size === 0}
-                style={{ minWidth: 180 }}
-                onClick={playSelected}
-              >
-                <Icon name="play" />{' '}
-                {selected.size > 0
-                  ? `Play ${selected.size} as ${game.currentRank}`
-                  : 'Play Cards'}
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 180 }}>
+                {canCallLiar && (
+                  <button
+                    className="btn danger"
+                    style={{ height: 56, fontSize: 15 }}
+                    onClick={callLiar}
+                  >
+                    <Icon name="fire" /> LIAR!
+                  </button>
+                )}
+                <button
+                  className="btn primary"
+                  disabled={!canPlay || selected.size === 0}
+                  style={{ height: canCallLiar ? 56 : 60, fontSize: 15 }}
+                  onClick={playSelected}
+                >
+                  <Icon name="play" />{' '}
+                  {selected.size > 0
+                    ? `Play ${selected.size} as ${game.currentRank}`
+                    : canPlay
+                    ? 'Select cards'
+                    : turnIsMine
+                    ? 'No cards'
+                    : 'Wait'}
+                </button>
+              </div>
             </div>
           </>
         )}

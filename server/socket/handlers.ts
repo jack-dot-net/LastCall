@@ -270,7 +270,7 @@ function bindSocket(ctx: AppContext, socket: IOSocket): void {
     ack({ ok: true });
   });
 
-  socket.on('game:decide', (payload, ack) => {
+  socket.on('game:callLiar', (ack) => {
     const session = requireSession(ctx, socket, ack);
     if (!session) return;
     const lobby = activeLobby(ctx, session);
@@ -278,9 +278,9 @@ function bindSocket(ctx: AppContext, socket: IOSocket): void {
       ack({ ok: false, error: 'Not in a lobby.' });
       return;
     }
-    const outcome = lobby.decide(session.id, !!payload?.challenge);
+    const outcome = lobby.callLiar(session.id);
     if (!outcome.ok) {
-      ack({ ok: false, error: outcome.error ?? 'Invalid decision.' });
+      ack({ ok: false, error: outcome.error ?? 'Invalid challenge.' });
       return;
     }
     emitLobbyState(ctx, lobby);

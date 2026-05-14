@@ -109,7 +109,7 @@ export type GameEvent =
   | { type: 'speech'; fromSeat: number; text: string }
   | { type: 'roundStart'; rank: Rank; round: number }
   | { type: 'play'; fromSeat: number; count: number; claimedRank: Rank }
-  | { type: 'decide'; fromSeat: number; challenge: boolean }
+  | { type: 'callLiar'; fromSeat: number }
   | { type: 'reveal'; cards: Card[]; lying: boolean; loserSeat: number }
   | { type: 'bellResult'; result: BellRoll }
   | { type: 'roundEnd'; aliveSeats: number[] }
@@ -158,8 +158,17 @@ export interface ClientToServerEvents {
   'lobby:setReady': (payload: { ready: boolean }, ack: (res: ActionResult) => void) => void;
   'lobby:start': (ack: (res: ActionResult) => void) => void;
   'chat:send': (payload: { text: string }, ack?: (res: ActionResult) => void) => void;
+  /**
+   * Play 1-3 cards face-down claiming the table call. Valid in both the
+   * round-opening "declare" phase and the chained "decision" phase — in the
+   * latter, playing implicitly trusts the previous play.
+   */
   'game:play': (payload: { cardIds: number[] }, ack: (res: ActionResult) => void) => void;
-  'game:decide': (payload: { challenge: boolean }, ack: (res: ActionResult) => void) => void;
+  /**
+   * Challenge the last play. Valid only in the "decision" phase.
+   * Reveals only the last batch on the pile.
+   */
+  'game:callLiar': (ack: (res: ActionResult) => void) => void;
   'game:pullBell': (ack: (res: ActionResult) => void) => void;
   'game:react': (payload: { emoji: string }) => void;
 }

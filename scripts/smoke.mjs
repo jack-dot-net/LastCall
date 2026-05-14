@@ -127,8 +127,8 @@ function waitFor(socket, event, predicate, label = event) {
     (p) => p.lobby.game && p.lobby.game.phase === 'bell',
     'bell phase'
   );
-  const decide = await ack(next.socket, 'game:decide', { challenge: true });
-  if (!decide?.ok) throw new Error('decide failed: ' + (decide && decide.error));
+  const decide = await ack(next.socket, 'game:callLiar');
+  if (!decide?.ok) throw new Error('callLiar failed: ' + (decide && decide.error));
   const bellState = await bellPhasePromise;
   console.log('  bell loser seat:', bellState.lobby.game.turnSeat);
 

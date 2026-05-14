@@ -1,6 +1,5 @@
 import {
   CHAMBERS,
-  HAND_SIZE,
   LIVES_MAX,
   LIVES_MIN,
   PLAYER_MAX,
@@ -345,23 +344,31 @@ export class Lobby {
   // Action: play
   // ============================================================
 
+  /**
+   * Play 1-3 cards. Works in BOTH "declare" (round-opening) and "decision"
+   * (mid-chain) phases — in the decision phase, playing implicitly trusts
+   * the previous play and passes the decision burden to the next player.
+   * Per Liar's Bar rules: cards are NOT replaced; the pile accumulates.
+   */
   play(playerId: string, cardIds: number[]): ActionOutcome {
     const s = this.seats.get(playerId);
     if (!s) return fail('Not in this lobby.');
     if (!this.game) return fail('Game not started.');
-    if (this.game.phase !== 'declare') return fail('Not the declare phase.');
+    if (this.game.phase !== 'declare' && this.game.phase !== 'decision') {
+      return fail('Cannot play right now.');
+    }
     if (this.game.turnSeat !== s.seat) return fail('Not your turn.');
     if (s.out) return fail('You are out.');
+    if (s.hand.length === 0) return fail('No cards to play — call Liar.');
     if (!Array.isArray(cardIds) || cardIds.length < 1 || cardIds.length > 3) {
       return fail('Play between 1 and 3 cards.');
     }
-    // Validate every card is in their hand.
     const idSet = new Set(cardIds);
     const chosen = s.hand.filter((c) => idSet.has(c.id));
     if (chosen.length !== cardIds.length) {
       return fail('Invalid card selection.');
     }
-    // Remove from hand, push to pile.
+    // Remove from hand, push to pile. NO refilling.
     s.hand = s.hand.filter((c) => !idSet.has(c.id));
     this.game.pile.push(...chosen);
     this.game.lastPlay = {
@@ -391,50 +398,21 @@ export class Lobby {
   }
 
   // ============================================================
-  // Action: decide (trust / challenge)
+  // Action: callLiar — challenge the last play
   // ============================================================
 
-  decide(playerId: string, challenge: boolean): ActionOutcome {
+  callLiar(playerId: string): ActionOutcome {
     const s = this.seats.get(playerId);
     if (!s) return fail('Not in this lobby.');
     if (!this.game) return fail('Game not started.');
-    if (this.game.phase !== 'decision') return fail('No decision pending.');
+    if (this.game.phase !== 'decision') return fail('No play to challenge.');
     if (this.game.turnSeat !== s.seat) return fail('Not your decision.');
-    if (!this.game.lastPlay) return fail('No play to decide on.');
+    if (!this.game.lastPlay) return fail('No play to challenge.');
 
     const events: GameEvent[] = [
-      { type: 'decide', fromSeat: s.seat, challenge },
+      { type: 'callLiar', fromSeat: s.seat },
     ];
 
-    if (!challenge) {
-      // Trust. Refill the player who played back to HAND_SIZE.
-      events.push({
-        type: 'log',
-        text: `${s.name} trusts ${this.playerBySeat(this.game.lastPlay.fromSeat)!.name}.`,
-        ts: Date.now(),
-      });
-      this.refillSeat(this.game.lastPlay.fromSeat);
-      this.game.phase = 'declare';
-      // Turn stays on the decider — they must now declare.
-      // If their hand is empty (rare), end the round.
-      if (s.hand.length === 0) {
-        events.push({
-          type: 'log',
-          text: `${s.name} has no cards. A new round.`,
-          ts: Date.now(),
-        });
-        this.beginRound(this.nextAliveSeatAfter(s.seat), events);
-        return { ok: true, events, handsToPush: this.aliveSeatIds(), changed: true };
-      }
-      return {
-        ok: true,
-        events,
-        handsToPush: [this.game.lastPlay.fromId, s.id],
-        changed: true,
-      };
-    }
-
-    // Challenge — reveal.
     const currentRank = this.game.currentRank;
     const lying = this.game.lastPlay.cards.some(
       (c) => c.suit !== currentRank && c.suit !== 'wild'
@@ -455,9 +433,9 @@ export class Lobby {
     });
     this.game.phase = 'bell';
     this.game.turnSeat = loserSeat;
-    this.game.pendingNextStarterSeat = lying
-      ? loserSeat
-      : this.game.lastPlay.fromSeat;
+    // The bell loser starts the next round (if they survive). If they're
+    // eliminated, the round will fall through to the next alive seat.
+    this.game.pendingNextStarterSeat = loserSeat;
 
     return { ok: true, events, handsToPush: [], changed: true };
   }
@@ -501,7 +479,9 @@ export class Lobby {
       return { ok: true, events, handsToPush: [], changed: true };
     }
 
-    const nextStart = this.nextAliveSeatAfter(
+    // Loser starts next round if alive; if they were eliminated, fall through
+    // to the next alive seat after them.
+    const nextStart = this.nearestAliveSeatFrom(
       this.game.pendingNextStarterSeat ?? puller
     );
     events.push({ type: 'roundEnd', aliveSeats: alive });
@@ -599,17 +579,6 @@ export class Lobby {
     return this.nextAliveSeatAfter(seat);
   }
 
-  private refillSeat(seat: number): void {
-    if (!this.game) return;
-    const p = this.playerBySeat(seat);
-    if (!p) return;
-    const need = HAND_SIZE - p.hand.length;
-    if (need <= 0) return;
-    const drawCount = Math.min(need, this.game.deck.length);
-    if (drawCount === 0) return;
-    const drawn = this.game.deck.splice(0, drawCount);
-    p.hand.push(...drawn);
-  }
 
   // ============================================================
   // Views
