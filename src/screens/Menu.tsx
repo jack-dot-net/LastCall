@@ -88,7 +88,7 @@ export function Menu() {
       <div style={{ display: 'grid', placeItems: 'center', padding: 24 }}>
         <div style={{ textAlign: 'center' }}>
           <div className="eyebrow in" style={{ marginBottom: 10 }}>
-            EST. 2026 · UNDERGROUND
+            EST. 2026 · jackdotnet
           </div>
           <h1
             className="neon in d1"
