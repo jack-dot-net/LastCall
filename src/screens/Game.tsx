@@ -91,9 +91,13 @@ export function Game() {
     : null;
 
   // Seat positions — rotate so the local player sits at the bottom.
+  // Depend on the array reference (not just `.length`) so changes to a
+  // player's lives / out flag / handCount refresh the rendered entries —
+  // otherwise the layout holds stale player objects and the life pips
+  // visually never update when someone takes a hit.
   const seatLayout = useMemo(() => {
     return computeSeatLayout(lobby.players, mySeat);
-  }, [lobby.players.length, mySeat]);
+  }, [lobby.players, mySeat]);
 
   // ---------- actions ----------
   function leave() {
@@ -247,38 +251,83 @@ export function Game() {
           </div>
           <div className="stack">
             {game.lastPlay ? (
-              game.lastPlay.cardsRevealed ? (
-                game.lastPlay.cardsRevealed.map((c, i) => (
-                  <motion.div
-                    key={c.id}
-                    initial={{ rotateY: 180 }}
-                    animate={{ rotateY: 0 }}
-                    transition={{ delay: i * 0.18, duration: 0.5 }}
-                    style={{
-                      position: 'absolute',
-                      left: i * 6,
-                      top: i * 4,
-                      transform: `rotate(${(i - 1) * 6}deg)`,
-                    }}
-                  >
-                    <GameCard suit={c.suit} small />
-                  </motion.div>
-                ))
-              ) : (
-                Array.from({ length: game.lastPlay.count }, (_, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      position: 'absolute',
-                      left: i * 4,
-                      top: i * 4,
-                      transform: `rotate(${(i - 1) * 6}deg)`,
-                    }}
-                  >
-                    <GameCard faceDown small />
-                  </div>
-                ))
-              )
+              <>
+                {game.lastPlay.cardsRevealed
+                  ? game.lastPlay.cardsRevealed.map((c, i) => {
+                      const spread = Math.min(34, 90 / Math.max(1, game.lastPlay!.count));
+                      const offset =
+                        (i - (game.lastPlay!.count - 1) / 2) * spread;
+                      return (
+                        <motion.div
+                          key={c.id}
+                          initial={{ rotateY: 180 }}
+                          animate={{ rotateY: 0 }}
+                          transition={{ delay: i * 0.18, duration: 0.5 }}
+                          style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: 0,
+                            transform: `translateX(calc(-50% + ${offset}px)) rotate(${
+                              (i - (game.lastPlay!.count - 1) / 2) * 8
+                            }deg)`,
+                          }}
+                        >
+                          <GameCard suit={c.suit} small />
+                        </motion.div>
+                      );
+                    })
+                  : Array.from({ length: game.lastPlay.count }, (_, i) => {
+                      const spread = Math.min(34, 90 / Math.max(1, game.lastPlay!.count));
+                      const offset =
+                        (i - (game.lastPlay!.count - 1) / 2) * spread;
+                      return (
+                        <motion.div
+                          key={i}
+                          initial={{ opacity: 0, scale: 0.85, y: -10 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          transition={{ delay: i * 0.06, duration: 0.25 }}
+                          style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: 0,
+                            transform: `translateX(calc(-50% + ${offset}px)) rotate(${
+                              (i - (game.lastPlay!.count - 1) / 2) * 8
+                            }deg)`,
+                          }}
+                        >
+                          <GameCard faceDown small />
+                        </motion.div>
+                      );
+                    })}
+                {/* Count badge — sits above the cards so the table can see
+                    at a glance how many were played without counting. */}
+                <motion.div
+                  key={`badge-${game.lastPlay.fromSeat}-${game.lastPlay.count}`}
+                  initial={{ opacity: 0, y: -6, scale: 0.85 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.25 }}
+                  style={{
+                    position: 'absolute',
+                    top: -34,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    padding: '4px 12px',
+                    background: 'color-mix(in oklab, var(--amber) 22%, var(--bg-3))',
+                    border: '1px solid var(--amber)',
+                    borderRadius: 999,
+                    fontFamily: 'var(--f-mono)',
+                    fontSize: 11,
+                    letterSpacing: '.22em',
+                    textTransform: 'uppercase',
+                    color: 'var(--ink-0)',
+                    boxShadow: 'var(--glow-amber)',
+                    whiteSpace: 'nowrap',
+                    zIndex: 6,
+                  }}
+                >
+                  {game.lastPlay.count} × {game.lastPlay.claimedRank}
+                </motion.div>
+              </>
             ) : (
               <div
                 style={{

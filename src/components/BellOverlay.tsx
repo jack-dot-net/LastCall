@@ -156,7 +156,15 @@ export function BellOverlay({
             </div>
           )}
           {phase === 'result' && result && (
-            <div style={{ textAlign: 'center' }}>
+            <div
+              style={{
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
               <div
                 className="neon"
                 style={{
@@ -169,21 +177,55 @@ export function BellOverlay({
               >
                 {result.ring ? 'IT RINGS' : 'SILENCE'}
               </div>
+              {/* Lives — the surviving pips. Visualises the life loss so
+                  it's unambiguous what happened. */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  marginTop: 4,
+                }}
+              >
+                {Array.from(
+                  { length: Math.max(result.livesAfter + (result.ring ? 1 : 0), result.livesAfter) },
+                  (_, k) => {
+                    const survived = k < result.livesAfter;
+                    const justLost = result.ring && k === result.livesAfter;
+                    return (
+                      <span
+                        key={k}
+                        className={`life ${survived ? '' : 'spent'}`}
+                        style={{
+                          width: 16,
+                          height: 16,
+                          opacity: justLost ? 0.6 : 1,
+                          transform: justLost ? 'scale(0.85)' : 'scale(1.2)',
+                          transition: 'opacity .3s, transform .3s',
+                          boxShadow: survived
+                            ? '0 0 14px color-mix(in oklab, var(--amber) 70%, transparent)'
+                            : 'none',
+                        }}
+                      />
+                    );
+                  }
+                )}
+              </div>
               <div
                 className="mono"
                 style={{
-                  color: 'var(--ink-2)',
-                  fontSize: 11,
-                  letterSpacing: '.3em',
+                  color: result.ring ? 'var(--ember)' : 'var(--ink-2)',
+                  fontSize: 12,
+                  letterSpacing: '.22em',
                   textTransform: 'uppercase',
-                  marginTop: 8,
+                  marginTop: 4,
                 }}
               >
                 {result.ring
                   ? result.eliminated
-                    ? `${player.name} is out.`
-                    : `${player.name} loses a life.`
-                  : `${player.name} survives.`}
+                    ? `${player.name} is out`
+                    : `${player.name}: ${result.livesAfter + 1} → ${result.livesAfter} lives`
+                  : `${player.name} survives`}
               </div>
             </div>
           )}

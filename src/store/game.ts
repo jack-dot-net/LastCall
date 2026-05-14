@@ -191,6 +191,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
           'info'
         );
         break;
+      case 'play': {
+        // Flash a speech bubble above the player who just played so the
+        // rest of the table can see what they claimed without having to
+        // squint at the pile.
+        const text = `${event.count} ${event.claimedRank.toUpperCase()}`;
+        state.setSpeech(event.fromSeat, text);
+        setTimeout(() => {
+          const cur = get().speech;
+          if (cur[event.fromSeat] === text) {
+            const next = { ...cur };
+            delete next[event.fromSeat];
+            set({ speech: next });
+          }
+        }, 3500);
+        break;
+      }
       case 'reveal':
         // The full visual lives in <RevealOverlay /> driven by game state.
         // The toast is still nice for the corner-of-eye signal.
