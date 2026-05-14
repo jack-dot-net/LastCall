@@ -343,7 +343,12 @@ function playerName(id) {
 }
 
 function username() {
-  const name = $('username').value.trim() || 'The Regular';
+  const name = $('username').value.trim();
+  if (!name) {
+    $('username').focus();
+    toast('Enter a name before taking a seat.');
+    return null;
+  }
   save(STORAGE.name, name);
   return name;
 }
@@ -365,12 +370,18 @@ function bindEvents() {
   }, { once: true });
   $('username').value = read(STORAGE.name) || '';
   $('game-code').addEventListener('input', normalizeCodeInput);
-  $('create-game').addEventListener('click', () => socket.emit('createGame', { username: username() }));
+  $('create-game').addEventListener('click', () => {
+    const name = username();
+    if (!name) return;
+    socket.emit('createGame', { username: name });
+  });
   $('join-game').addEventListener('click', () => {
     normalizeCodeInput();
     const code = $('game-code').value;
     if (!code) return toast('Enter a game code.');
-    socket.emit('joinGame', { code, username: username(), playerToken: read(STORAGE.token) });
+    const name = username();
+    if (!name) return;
+    socket.emit('joinGame', { code, username: name, playerToken: read(STORAGE.token) });
   });
   $('restore-game').addEventListener('click', () => socket.emit('rejoinGame', { code: read(STORAGE.code), playerToken: read(STORAGE.token) }));
   $('copy-code').addEventListener('click', async () => {

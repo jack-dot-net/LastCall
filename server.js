@@ -40,12 +40,15 @@ function makeRoomCode() {
 }
 
 function cleanName(name) {
-  const cleaned = String(name || '')
+  return String(name || '')
     .replace(/[<>]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 18);
-  return cleaned || 'Stranger';
+}
+
+function validName(name) {
+  return cleanName(name).length > 0;
 }
 
 function nameTaken(room, name, exceptId = null) {
@@ -310,6 +313,7 @@ function applyPenalty(room, loser, reason) {
 
 io.on('connection', (socket) => {
   socket.on('createGame', ({ username }) => {
+    if (!validName(username)) return socket.emit('notice', { type: 'error', message: 'Enter a name before taking a seat.' });
     createRoom(socket, cleanName(username));
   });
 
@@ -318,6 +322,7 @@ io.on('connection', (socket) => {
     if (!room) return socket.emit('notice', { type: 'error', message: 'No table with that code.' });
     const returning = room.players.find((p) => p.token === playerToken);
     if (returning) return reconnect(socket, room, returning);
+    if (!validName(username)) return socket.emit('notice', { type: 'error', message: 'Enter a name before taking a seat.' });
     return joinRoom(socket, room, cleanName(username));
   });
 
