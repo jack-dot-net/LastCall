@@ -4,7 +4,11 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: npm install && npm run build
+    # --include=dev forces npm to install devDependencies (vite, typescript,
+    # tailwindcss, etc.) even though Render sets NODE_ENV=production during
+    # the build phase. Without it `npm run build` would fail with `vite: not
+    # found`.
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
@@ -12,3 +16,9 @@ services:
         value: "20"
       - key: NODE_ENV
         value: production
+      # Belt-and-braces: also disable npm's "production install" mode so the
+      # build script can resolve dev dependencies on its own. Render reads
+      # this during both build and runtime; runtime is unaffected because
+      # devDeps are already on disk by then.
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"

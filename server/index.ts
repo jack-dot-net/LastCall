@@ -50,9 +50,13 @@ if (IS_PROD) {
 }
 
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
-  cors: IS_PROD
-    ? { origin: false }
-    : { origin: CORS_ORIGINS, credentials: false },
+  // In production the client is served from the same origin as the server,
+  // so reflecting the request origin is correct. `origin: false` would
+  // disable CORS entirely and break the polling fallback on some proxies.
+  cors: {
+    origin: IS_PROD ? true : CORS_ORIGINS,
+    credentials: false,
+  },
   pingInterval: 20000,
   pingTimeout: 20000,
   maxHttpBufferSize: 32_000,
