@@ -1,676 +1,456 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: { origin: false },
+  pingTimeout: 20000,
+  pingInterval: 25000,
+});
 
 const PORT = process.env.PORT || 3000;
+const MAX_PLAYERS = 8;
+const MIN_PLAYERS = 2;
+const STARTING_LIVES = 3;
+const RECONNECT_GRACE_MS = 45000;
+const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CLAIM_RANKS = ['Crows', 'Moons', 'Keys'];
 
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/health', (_req, res) => res.send('ok'));
+app.get('/health', (_req, res) => res.status(200).json({ ok: true, name: 'Last Call' }));
+app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const rooms = new Map();
-const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const MAX_PLAYERS = 12;
-const MIN_PLAYERS = 2;
+const socketIndex = new Map();
 
-// ============================================================
-// SHARED HELPERS
-// ============================================================
+function randomId(bytes = 16) {
+  return crypto.randomBytes(bytes).toString('hex');
+}
 
-function genRoomCode() {
-  let code;
+function makeRoomCode() {
+  let code = '';
   do {
-    code = '';
-    for (let i = 0; i < 4; i++) code += ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)];
+    code = Array.from({ length: 5 }, () => ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)]).join('');
   } while (rooms.has(code));
   return code;
 }
 
-function shuffle(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
+function cleanName(name) {
+  const cleaned = String(name || '')
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 18);
+  return cleaned || 'Stranger';
+}
+
+function nameTaken(room, name, exceptId = null) {
+  return room.players.some((p) => p.id !== exceptId && p.name.toLowerCase() === name.toLowerCase());
+}
+
+function shuffle(items) {
+  const copy = items.slice();
+  for (let i = copy.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+    [copy[i], copy[j]] = [copy[j], copy[i]];
   }
-  return a;
+  return copy;
 }
 
-function addLog(room, msg, type = 'info', data = null) {
-  const entry = { time: Date.now(), msg, type };
-  if (data) entry.data = data;
-  room.log.push(entry);
-  if (room.log.length > 200) room.log.shift();
-}
-
-function nextAlivePlayer(room, fromIdx) {
-  const n = room.players.length;
-  for (let step = 1; step <= n; step++) {
-    const i = (fromIdx + step) % n;
-    if (room.players[i].alive) return i;
+function createDeck(playerCount) {
+  const deck = [];
+  const copies = Math.max(1, Math.ceil(playerCount / 4));
+  for (let c = 0; c < copies; c += 1) {
+    for (const rank of CLAIM_RANKS) {
+      for (let i = 0; i < 8; i += 1) deck.push({ rank, wild: false });
+    }
+    for (let i = 0; i < 4; i += 1) deck.push({ rank: 'Ember', wild: true });
   }
-  return -1;
+  return shuffle(deck);
 }
 
-function sanitizeName(name) {
-  name = String(name || '').replace(/[<>]/g, '').slice(0, 16).trim();
-  return name || 'Player';
+function log(room, text, type = 'info', data = {}) {
+  room.log.push({ id: randomId(6), time: Date.now(), text, type, data });
+  if (room.log.length > 120) room.log.shift();
 }
 
-function pickRandomAlive(room) {
-  const alive = room.players.map((p, i) => p.alive ? i : -1).filter(i => i >= 0);
-  return alive[Math.floor(Math.random() * alive.length)];
-}
-
-function publicPlayer(p) {
+function publicPlayer(player) {
   return {
-    id: p.id,
-    name: p.name,
-    alive: p.alive,
-    disconnected: p.disconnected,
-    chambers: p.chambers,
-    shotsFired: p.shotsFired,
-    handSize: p.hand ? p.hand.length : 0,
-    diceCount: p.dice ? p.dice.length : 0,
+    id: player.id,
+    name: player.name,
+    ready: player.ready,
+    host: false,
+    connected: player.connected,
+    alive: player.alive,
+    lives: player.lives,
+    handCount: player.hand.length,
   };
 }
 
-function getRoomState(room, viewerId) {
-  const me = room.players.find(p => p.id === viewerId);
-  const base = {
+function viewerState(room, viewerId) {
+  const viewer = room.players.find((p) => p.id === viewerId);
+  return {
     code: room.code,
-    hostId: room.hostId,
     state: room.state,
-    gameMode: room.gameMode,
-    players: room.players.map(publicPlayer),
-    log: room.log.slice(-30),
-    yourId: viewerId,
-    roundNumber: room.roundNumber,
-    currentPlayerIdx: room.currentPlayerIdx,
-    lastActorIdx: room.lastActorIdx,
+    hostId: room.hostId,
+    winnerId: room.winnerId,
+    round: room.round,
+    claimRank: room.claimRank,
+    currentTurnId: room.currentTurnId,
+    lastClaim: room.lastClaim,
     resolving: room.resolving,
+    settings: {
+      maxPlayers: MAX_PLAYERS,
+      minPlayers: MIN_PLAYERS,
+      startingLives: STARTING_LIVES,
+    },
+    players: room.players.map((p) => ({ ...publicPlayer(p), host: p.id === room.hostId })),
+    hand: viewer && room.state === 'playing' && viewer.alive ? viewer.hand : [],
+    you: viewerId,
+    log: room.log.slice(-40),
   };
-  if (room.gameMode === 'cards') {
-    base.tableCard = room.tableCard;
-    base.lastPlayedCount = room.lastPlayedCards ? room.lastPlayedCards.length : 0;
-    base.yourHand = me ? (me.hand || []) : [];
-  } else if (room.gameMode === 'dice') {
-    base.lastBid = room.lastBid;
-    base.yourDice = me ? (me.dice || []) : [];
-    base.totalDiceInPlay = room.players.filter(p => p.alive).reduce((s, p) => s + (p.dice ? p.dice.length : 0), 0);
-  } else if (room.gameMode === 'poker') {
-    base.targetRank = room.targetRank;
-    base.lastPlayedCount = room.lastPlayedCards ? room.lastPlayedCards.length : 0;
-    base.yourHand = me ? (me.hand || []) : [];
-  }
-  return base;
 }
 
-function broadcastRoom(room) {
-  for (const p of room.players) {
-    io.to(p.id).emit('roomUpdate', getRoomState(room, p.id));
+function emitRoom(room) {
+  for (const player of room.players) {
+    if (player.socketId) io.to(player.socketId).emit('state', viewerState(room, player.id));
   }
 }
 
-// ============================================================
-// SHARED SHOT RESOLUTION
-// ============================================================
-
-function performShot(room, loserId, callerId, accusedId) {
-  const loser = room.players.find(p => p.id === loserId);
-  if (!loser) return;
-
-  setTimeout(() => {
-    const chamber = loser.shotsFired;
-    loser.shotsFired++;
-    const isBullet = (chamber === loser.bulletPos);
-
-    if (isBullet) {
-      loser.alive = false;
-      addLog(room, `${loser.name} is dead.`, 'dead', { player: loser.name });
-    } else {
-      const left = loser.chambers - loser.shotsFired;
-      addLog(room, `${loser.name} survives — ${left} chamber${left === 1 ? '' : 's'} left.`, 'survive', { player: loser.name, chambersLeft: left });
-    }
-
-    io.to(room.code).emit('shot', {
-      playerId: loser.id,
-      died: isBullet,
-      shotsFired: loser.shotsFired,
-      chambers: loser.chambers,
-    });
-    broadcastRoom(room);
-
-    let nextStarter;
-    if (loser.alive) {
-      nextStarter = room.players.findIndex(p => p.id === loser.id);
-    } else {
-      const otherId = (loser.id === callerId) ? accusedId : callerId;
-      nextStarter = room.players.findIndex(p => p.id === otherId);
-      if (nextStarter < 0 || !room.players[nextStarter].alive) {
-        nextStarter = nextAlivePlayer(room, nextStarter >= 0 ? nextStarter : 0);
-      }
-    }
-    room.currentPlayerIdx = nextStarter;
-
-    setTimeout(() => {
-      room.resolving = false;
-      const survivors = room.players.filter(p => p.alive);
-      if (survivors.length <= 1) {
-        room.state = 'finished';
-        if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win', { player: survivors[0].name });
-        broadcastRoom(room);
-        return;
-      }
-      games[room.gameMode].startRound(room);
-    }, 2800);
-  }, 1800);
+function alivePlayers(room) {
+  return room.players.filter((p) => p.alive);
 }
 
-// ============================================================
-// CARDS MODE
-// ============================================================
-
-const CARD_TYPES = ['King', 'Queen', 'Ace'];
-
-function createCardsDeck(multiplier) {
-  const deck = [];
-  for (let m = 0; m < multiplier; m++) {
-    for (let i = 0; i < 6; i++) deck.push('King');
-    for (let i = 0; i < 6; i++) deck.push('Queen');
-    for (let i = 0; i < 6; i++) deck.push('Ace');
-    for (let i = 0; i < 2; i++) deck.push('Joker');
+function nextAliveAfter(room, playerId) {
+  const alive = alivePlayers(room);
+  if (alive.length === 0) return null;
+  const start = Math.max(0, room.players.findIndex((p) => p.id === playerId));
+  for (let step = 1; step <= room.players.length; step += 1) {
+    const candidate = room.players[(start + step) % room.players.length];
+    if (candidate && candidate.alive) return candidate.id;
   }
-  return deck;
+  return alive[0].id;
 }
 
-const cardsGame = {
-  name: 'cards',
-  init(room) {
-    room.tableCard = null;
-    room.lastPlayedCards = null;
-    room.lastActorIdx = null;
-    room.currentPlayerIdx = null;
-    room.roundNumber = 0;
-    for (const p of room.players) { p.hand = []; p.dice = []; }
-  },
-  startRound(room) {
-    const survivors = room.players.filter(p => p.alive);
-    if (survivors.length <= 1) {
-      room.state = 'finished';
-      if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win');
-      else addLog(room, 'No survivors.', 'system');
-      broadcastRoom(room);
-      return;
-    }
-    const multiplier = Math.max(1, Math.ceil(survivors.length / 4));
-    const deck = shuffle(createCardsDeck(multiplier));
-    let idx = 0;
-    for (const p of room.players) {
-      if (p.alive) { p.hand = deck.slice(idx, idx + 5); idx += 5; }
-      else { p.hand = []; }
-    }
-    room.tableCard = CARD_TYPES[Math.floor(Math.random() * CARD_TYPES.length)];
-    room.lastPlayedCards = null;
-    room.lastActorIdx = null;
-    room.roundNumber++;
-    if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
-      room.currentPlayerIdx = pickRandomAlive(room);
-    }
-    addLog(room, `Round ${room.roundNumber}`, 'round', { round: room.roundNumber });
-    addLog(room, `Table card: ${room.tableCard}`, 'round-info', { mode: 'cards', tableCard: room.tableCard });
-    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`, 'turn', { player: room.players[room.currentPlayerIdx].name });
-    broadcastRoom(room);
-  },
-  handlePlay(room, socket, { indices }) {
-    const playerIdx = room.players.findIndex(p => p.id === socket.id);
-    if (playerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
-    const player = room.players[playerIdx];
-    if (!player.alive) return;
-    if (!Array.isArray(indices) || indices.length < 1 || indices.length > 3) {
-      return socket.emit('errorMsg', 'You must play 1–3 cards.');
-    }
-    const uniq = [...new Set(indices)].filter(i => Number.isInteger(i) && i >= 0 && i < player.hand.length);
-    if (uniq.length !== indices.length) return socket.emit('errorMsg', 'Invalid selection.');
-    uniq.sort((a, b) => b - a);
-    const played = uniq.map(i => player.hand.splice(i, 1)[0]);
-    room.lastPlayedCards = played;
-    room.lastActorIdx = playerIdx;
-    addLog(room, `${player.name} plays ${played.length} card${played.length > 1 ? 's' : ''} as ${room.tableCard}${played.length > 1 ? 's' : ''}.`, 'play', { player: player.name, mode: 'cards', count: played.length, tableCard: room.tableCard });
-    room.currentPlayerIdx = nextAlivePlayer(room, playerIdx);
-    broadcastRoom(room);
-  },
-  handleLiar(room, socket) {
-    const callerIdx = room.players.findIndex(p => p.id === socket.id);
-    if (callerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
-    if (room.lastPlayedCards === null || room.lastActorIdx === null) {
-      return socket.emit('errorMsg', 'No one has played yet.');
-    }
-    const caller = room.players[callerIdx];
-    const accused = room.players[room.lastActorIdx];
-    const cards = room.lastPlayedCards;
-    const tableCard = room.tableCard;
-    const allMatch = cards.every(c => c === tableCard || c === 'Joker');
-    const loser = allMatch ? caller : accused;
-
-    addLog(room, `${caller.name} calls LIAR on ${accused.name}!`, 'liar', { caller: caller.name, accused: accused.name });
-    addLog(room, `Cards: ${cards.join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`, allMatch ? 'verdict-truth' : 'verdict-lie', { mode: 'cards', cards, tableCard });
-    addLog(room, `${loser.name} pulls the trigger…`, 'tension', { player: loser.name });
-
-    room.resolving = true;
-    io.to(room.code).emit('reveal', {
-      mode: 'cards', cards, tableCard, truthful: allMatch,
-      accusedId: accused.id, callerId: caller.id, loserId: loser.id,
-    });
-    broadcastRoom(room);
-    performShot(room, loser.id, caller.id, accused.id);
-  },
-};
-
-// ============================================================
-// DICE MODE
-// ============================================================
-
-function bidValue(qty, face) {
-  return qty * 7 + face;
+function safeRoom(code) {
+  return rooms.get(String(code || '').toUpperCase().trim());
 }
 
-const diceGame = {
-  name: 'dice',
-  init(room) {
-    room.lastBid = null;
-    room.lastActorIdx = null;
-    room.currentPlayerIdx = null;
-    room.roundNumber = 0;
-    for (const p of room.players) { p.dice = []; p.hand = []; }
-  },
-  startRound(room) {
-    const survivors = room.players.filter(p => p.alive);
-    if (survivors.length <= 1) {
-      room.state = 'finished';
-      if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win');
-      broadcastRoom(room);
-      return;
-    }
-    for (const p of room.players) {
-      p.dice = p.alive ? Array.from({ length: 5 }, () => 1 + Math.floor(Math.random() * 6)) : [];
-    }
-    room.lastBid = null;
-    room.lastActorIdx = null;
-    room.roundNumber++;
-    if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
-      room.currentPlayerIdx = pickRandomAlive(room);
-    }
-    addLog(room, `Round ${room.roundNumber}`, 'round', { round: room.roundNumber });
-    addLog(room, 'Dice rolled.', 'round-info', { mode: 'dice', event: 'dice-rolled' });
-    addLog(room, `${room.players[room.currentPlayerIdx].name} starts the bidding.`, 'turn', { player: room.players[room.currentPlayerIdx].name });
-    broadcastRoom(room);
-  },
-  handlePlay(room, socket, { qty, face }) {
-    const playerIdx = room.players.findIndex(p => p.id === socket.id);
-    if (playerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
-    const player = room.players[playerIdx];
-    if (!player.alive) return;
-    qty = parseInt(qty);
-    face = parseInt(face);
-    if (!Number.isInteger(qty) || qty < 1) return socket.emit('errorMsg', 'Invalid quantity.');
-    if (!Number.isInteger(face) || face < 1 || face > 6) return socket.emit('errorMsg', 'Invalid face.');
-
-    const totalDice = room.players.filter(p => p.alive).reduce((s, p) => s + p.dice.length, 0);
-    if (qty > totalDice) return socket.emit('errorMsg', `Only ${totalDice} dice in play.`);
-
-    if (room.lastBid) {
-      const prev = bidValue(room.lastBid.qty, room.lastBid.face);
-      const next = bidValue(qty, face);
-      if (next <= prev) return socket.emit('errorMsg', 'Bid must increase.');
-    }
-
-    room.lastBid = { qty, face, playerIdx };
-    room.lastActorIdx = playerIdx;
-    addLog(room, `${player.name} bids ${qty} × ${face}${face === 1 ? ' (wild)' : ''}.`, 'play', { player: player.name, mode: 'dice', qty, face });
-    room.currentPlayerIdx = nextAlivePlayer(room, playerIdx);
-    broadcastRoom(room);
-  },
-  handleLiar(room, socket) {
-    const callerIdx = room.players.findIndex(p => p.id === socket.id);
-    if (callerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
-    if (!room.lastBid) return socket.emit('errorMsg', 'No bid yet.');
-
-    const caller = room.players[callerIdx];
-    const bidder = room.players[room.lastBid.playerIdx];
-    const { qty, face } = room.lastBid;
-
-    let count = 0;
-    const allDice = [];
-    for (const p of room.players) {
-      if (p.alive) {
-        allDice.push({ playerId: p.id, name: p.name, dice: p.dice.slice() });
-        for (const d of p.dice) {
-          if (d === face || (d === 1 && face !== 1)) count++;
-        }
-      }
-    }
-
-    const bidMet = count >= qty;
-    const loser = bidMet ? caller : bidder;
-
-    addLog(room, `${caller.name} calls LIAR on ${bidder.name}!`, 'liar', { caller: caller.name, accused: bidder.name });
-    addLog(room, `Bid ${qty} × ${face} — found ${count}. ${bidMet ? 'Bid stands!' : 'Bid busts!'}`, bidMet ? 'verdict-truth' : 'verdict-lie', { mode: 'dice', qty, face, count });
-    addLog(room, `${loser.name} pulls the trigger…`, 'tension', { player: loser.name });
-
-    room.resolving = true;
-    io.to(room.code).emit('reveal', {
-      mode: 'dice', callType: 'liar', qty, face, count, bidMet, allDice,
-      bidderId: bidder.id, callerId: caller.id, loserId: loser.id,
-    });
-    broadcastRoom(room);
-    performShot(room, loser.id, caller.id, bidder.id);
-  },
-  handleSpotOn(room, socket) {
-    const callerIdx = room.players.findIndex(p => p.id === socket.id);
-    if (callerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
-    if (!room.lastBid) return socket.emit('errorMsg', 'No bid yet.');
-
-    const caller = room.players[callerIdx];
-    const bidder = room.players[room.lastBid.playerIdx];
-    const { qty, face } = room.lastBid;
-
-    let count = 0;
-    const allDice = [];
-    for (const p of room.players) {
-      if (p.alive) {
-        allDice.push({ playerId: p.id, name: p.name, dice: p.dice.slice() });
-        for (const d of p.dice) {
-          if (d === face || (d === 1 && face !== 1)) count++;
-        }
-      }
-    }
-
-    const exact = count === qty;
-    const loser = exact ? bidder : caller;
-
-    addLog(room, `${caller.name} calls SPOT ON on ${bidder.name}!`, 'spoton', { caller: caller.name, accused: bidder.name });
-    addLog(room, `Bid ${qty} × ${face} — found ${count}. ${exact ? 'SPOT ON!' : 'Off — missed by ' + Math.abs(count - qty) + '.'}`, exact ? 'verdict-truth' : 'verdict-lie', { mode: 'dice', qty, face, count, spoton: true });
-    addLog(room, `${loser.name} pulls the trigger…`, 'tension', { player: loser.name });
-
-    room.resolving = true;
-    io.to(room.code).emit('reveal', {
-      mode: 'dice', callType: 'spoton', qty, face, count, exact, allDice,
-      bidderId: bidder.id, callerId: caller.id, loserId: loser.id,
-    });
-    broadcastRoom(room);
-    performShot(room, loser.id, caller.id, bidder.id);
-  },
-};
-
-// ============================================================
-// POKER MODE — Liar's-Bar-style with 52-card deck
-// ============================================================
-
-function rankName(r) {
-  return ({ 11: 'J', 12: 'Q', 13: 'K', 14: 'A' })[r] || String(r);
-}
-
-function pokerCardLabel(c) {
-  if (c && c.joker) return 'Joker';
-  return `${rankName(c.rank)}${c.suit}`;
-}
-
-function createPokerDeck(numDecks) {
-  const suits = ['S', 'H', 'D', 'C'];
-  const deck = [];
-  for (let n = 0; n < numDecks; n++) {
-    for (const s of suits) {
-      for (let r = 2; r <= 14; r++) deck.push({ rank: r, suit: s });
-    }
-    deck.push({ joker: true });
-    deck.push({ joker: true });
+function assignNewHost(room) {
+  if (room.players.some((p) => p.id === room.hostId && p.connected)) return;
+  const next = room.players.find((p) => p.connected) || room.players[0];
+  if (next) {
+    room.hostId = next.id;
+    log(room, `${next.name} now holds the house key.`, 'system', { playerId: next.id });
   }
-  return deck;
 }
 
-const pokerGame = {
-  name: 'poker',
-  init(room) {
-    room.targetRank = null;
-    room.lastPlayedCards = null;
-    room.lastActorIdx = null;
-    room.currentPlayerIdx = null;
-    room.roundNumber = 0;
-    for (const p of room.players) { p.hand = []; p.dice = []; }
-  },
-  startRound(room) {
-    const survivors = room.players.filter(p => p.alive);
-    if (survivors.length <= 1) {
-      room.state = 'finished';
-      if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win');
-      broadcastRoom(room);
-      return;
-    }
-    const cardsNeeded = survivors.length * 5;
-    const numDecks = Math.max(1, Math.ceil(cardsNeeded / 54));
-    const deck = shuffle(createPokerDeck(numDecks));
-    let idx = 0;
-    for (const p of room.players) {
-      if (p.alive) { p.hand = deck.slice(idx, idx + 5); idx += 5; }
-      else { p.hand = []; }
-    }
-    // Pick a random target rank for this round
-    room.targetRank = 2 + Math.floor(Math.random() * 13);
-    room.lastPlayedCards = null;
-    room.lastActorIdx = null;
-    room.roundNumber++;
-    if (room.currentPlayerIdx === null || room.currentPlayerIdx < 0 || !room.players[room.currentPlayerIdx]?.alive) {
-      room.currentPlayerIdx = pickRandomAlive(room);
-    }
-    addLog(room, `Round ${room.roundNumber}`, 'round', { round: room.roundNumber });
-    addLog(room, `Target rank: ${rankName(room.targetRank)}`, 'round-info', { mode: 'poker', targetRank: room.targetRank });
-    addLog(room, `${room.players[room.currentPlayerIdx].name} starts.`, 'turn', { player: room.players[room.currentPlayerIdx].name });
-    broadcastRoom(room);
-  },
-  handlePlay(room, socket, { indices }) {
-    const playerIdx = room.players.findIndex(p => p.id === socket.id);
-    if (playerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
-    const player = room.players[playerIdx];
-    if (!player.alive) return;
-    if (!Array.isArray(indices) || indices.length < 1 || indices.length > 3) {
-      return socket.emit('errorMsg', 'You must play 1–3 cards.');
-    }
-    const uniq = [...new Set(indices)].filter(i => Number.isInteger(i) && i >= 0 && i < player.hand.length);
-    if (uniq.length !== indices.length) return socket.emit('errorMsg', 'Invalid selection.');
-    uniq.sort((a, b) => b - a);
-    const played = uniq.map(i => player.hand.splice(i, 1)[0]);
-    room.lastPlayedCards = played;
-    room.lastActorIdx = playerIdx;
-    const tn = rankName(room.targetRank);
-    addLog(room, `${player.name} plays ${played.length} card${played.length > 1 ? 's' : ''} as ${tn}${played.length > 1 ? 's' : ''}.`, 'play', { player: player.name, mode: 'poker', count: played.length, targetRank: room.targetRank });
-    room.currentPlayerIdx = nextAlivePlayer(room, playerIdx);
-    broadcastRoom(room);
-  },
-  handleLiar(room, socket) {
-    const callerIdx = room.players.findIndex(p => p.id === socket.id);
-    if (callerIdx !== room.currentPlayerIdx) return socket.emit('errorMsg', 'Not your turn.');
-    if (room.lastPlayedCards === null || room.lastActorIdx === null) {
-      return socket.emit('errorMsg', 'No one has played yet.');
-    }
-    const caller = room.players[callerIdx];
-    const accused = room.players[room.lastActorIdx];
-    const cards = room.lastPlayedCards;
-    const target = room.targetRank;
-    const allMatch = cards.every(c => c.joker || c.rank === target);
-    const loser = allMatch ? caller : accused;
+function maybeFinish(room) {
+  const survivors = alivePlayers(room);
+  if (room.state === 'playing' && survivors.length <= 1) {
+    room.state = 'finished';
+    room.currentTurnId = null;
+    room.resolving = false;
+    room.winnerId = survivors[0]?.id || null;
+    if (survivors[0]) log(room, `${survivors[0].name} survives Last Call.`, 'win', { playerId: survivors[0].id });
+    return true;
+  }
+  return false;
+}
 
-    addLog(room, `${caller.name} calls LIAR on ${accused.name}!`, 'liar', { caller: caller.name, accused: accused.name });
-    addLog(room, `Cards: ${cards.map(pokerCardLabel).join(', ')} — ${allMatch ? 'truth!' : 'lie!'}`, allMatch ? 'verdict-truth' : 'verdict-lie', { mode: 'poker', cards, targetRank: target });
-    addLog(room, `${loser.name} pulls the trigger…`, 'tension', { player: loser.name });
+function startRound(room, starterId = null) {
+  if (maybeFinish(room)) return;
+  const survivors = alivePlayers(room);
+  const deck = createDeck(survivors.length);
+  room.round += 1;
+  room.claimRank = CLAIM_RANKS[Math.floor(Math.random() * CLAIM_RANKS.length)];
+  room.lastClaim = null;
+  room.resolving = false;
+  for (const player of room.players) {
+    player.hand = player.alive ? deck.splice(0, 5) : [];
+  }
+  const starter = starterId && survivors.some((p) => p.id === starterId) ? starterId : survivors[Math.floor(Math.random() * survivors.length)].id;
+  room.currentTurnId = starter;
+  log(room, `Round ${room.round}: the house calls ${room.claimRank}.`, 'round', { rank: room.claimRank, round: room.round });
+  log(room, `${room.players.find((p) => p.id === starter)?.name || 'Someone'} has the first word.`, 'turn', { playerId: starter });
+}
 
-    room.resolving = true;
-    io.to(room.code).emit('reveal', {
-      mode: 'poker', cards, targetRank: target, truthful: allMatch,
-      accusedId: accused.id, callerId: caller.id, loserId: loser.id,
-    });
-    broadcastRoom(room);
-    performShot(room, loser.id, caller.id, accused.id);
-  },
-};
+function createRoom(hostSocket, name) {
+  const code = makeRoomCode();
+  const host = {
+    id: randomId(10),
+    socketId: hostSocket.id,
+    token: randomId(18),
+    name,
+    ready: true,
+    connected: true,
+    alive: true,
+    lives: STARTING_LIVES,
+    hand: [],
+    disconnectTimer: null,
+  };
+  const room = {
+    code,
+    hostId: host.id,
+    state: 'lobby',
+    players: [host],
+    round: 0,
+    claimRank: null,
+    currentTurnId: null,
+    lastClaim: null,
+    resolving: false,
+    winnerId: null,
+    log: [],
+    createdAt: Date.now(),
+  };
+  rooms.set(code, room);
+  socketIndex.set(hostSocket.id, { roomCode: code, playerId: host.id });
+  hostSocket.join(code);
+  log(room, `${host.name} opened a table.`, 'system', { playerId: host.id });
+  hostSocket.emit('joined', { code, playerId: host.id, playerToken: host.token });
+  emitRoom(room);
+}
 
-// ============================================================
-// CONNECTION HANDLING
-// ============================================================
+function joinRoom(socket, room, name) {
+  if (room.state !== 'lobby') return socket.emit('notice', { type: 'error', message: 'That table is already in a game.' });
+  if (room.players.length >= MAX_PLAYERS) return socket.emit('notice', { type: 'error', message: 'That table is full.' });
+  if (nameTaken(room, name)) return socket.emit('notice', { type: 'error', message: 'That name is already seated here.' });
+  const player = {
+    id: randomId(10),
+    socketId: socket.id,
+    token: randomId(18),
+    name,
+    ready: false,
+    connected: true,
+    alive: true,
+    lives: STARTING_LIVES,
+    hand: [],
+    disconnectTimer: null,
+  };
+  room.players.push(player);
+  socketIndex.set(socket.id, { roomCode: room.code, playerId: player.id });
+  socket.join(room.code);
+  log(room, `${player.name} slipped into the booth.`, 'system', { playerId: player.id });
+  socket.emit('joined', { code: room.code, playerId: player.id, playerToken: player.token });
+  emitRoom(room);
+}
 
-const games = { cards: cardsGame, dice: diceGame, poker: pokerGame };
+function reconnect(socket, room, player) {
+  clearTimeout(player.disconnectTimer);
+  player.disconnectTimer = null;
+  player.socketId = socket.id;
+  player.connected = true;
+  socketIndex.set(socket.id, { roomCode: room.code, playerId: player.id });
+  socket.join(room.code);
+  log(room, `${player.name} found their way back through the smoke.`, 'system', { playerId: player.id });
+  socket.emit('joined', { code: room.code, playerId: player.id, playerToken: player.token });
+  emitRoom(room);
+}
+
+function removeFromLobby(room, player) {
+  const index = room.players.findIndex((p) => p.id === player.id);
+  if (index >= 0) room.players.splice(index, 1);
+  log(room, `${player.name} left the table.`, 'system', { playerId: player.id });
+  if (room.players.length === 0) {
+    rooms.delete(room.code);
+    return;
+  }
+  assignNewHost(room);
+  emitRoom(room);
+}
+
+function handleDisconnect(socket) {
+  const ref = socketIndex.get(socket.id);
+  if (!ref) return;
+  socketIndex.delete(socket.id);
+  const room = rooms.get(ref.roomCode);
+  if (!room) return;
+  socket.leave(room.code);
+  const player = room.players.find((p) => p.id === ref.playerId);
+  if (!player || player.socketId !== socket.id) return;
+  player.socketId = null;
+  player.connected = false;
+
+  if (room.state === 'lobby' || room.state === 'finished') {
+    removeFromLobby(room, player);
+    return;
+  }
+
+  log(room, `${player.name} vanished from the table. Reconnect grace started.`, 'disconnect', { playerId: player.id });
+  assignNewHost(room);
+  if (room.currentTurnId === player.id) room.currentTurnId = nextAliveAfter(room, player.id);
+  player.disconnectTimer = setTimeout(() => {
+    const latestRoom = rooms.get(room.code);
+    const latest = latestRoom?.players.find((p) => p.id === player.id);
+    if (!latest || latest.connected || latestRoom.state !== 'playing') return;
+    latest.alive = false;
+    latest.lives = 0;
+    latest.hand = [];
+    log(latestRoom, `${latest.name} missed Last Call and is out.`, 'penalty', { playerId: latest.id });
+    maybeFinish(latestRoom);
+    emitRoom(latestRoom);
+  }, RECONNECT_GRACE_MS);
+  maybeFinish(room);
+  emitRoom(room);
+}
+
+function applyPenalty(room, loser, reason) {
+  loser.lives = Math.max(0, loser.lives - 1);
+  log(room, `${loser.name} loses composure: ${reason}`, 'penalty', { playerId: loser.id, lives: loser.lives });
+  if (loser.lives <= 0) {
+    loser.alive = false;
+    loser.hand = [];
+    log(room, `${loser.name} is out of the night.`, 'out', { playerId: loser.id });
+  }
+}
 
 io.on('connection', (socket) => {
-  let currentRoomCode = null;
-  const getRoom = () => currentRoomCode ? rooms.get(currentRoomCode) : null;
-
-  function addPlayerToRoom(room, name) {
-    socket.join(room.code);
-    room.players.push({
-      id: socket.id, name,
-      alive: true, disconnected: false,
-      chambers: 6, shotsFired: 0,
-      bulletPos: Math.floor(Math.random() * 6),
-      hand: [], dice: [],
-    });
-    addLog(room, `${name} entered the bar.`, 'system');
-  }
-
-  socket.on('createRoom', ({ name }) => {
-    name = sanitizeName(name);
-    const code = genRoomCode();
-    const room = {
-      code, hostId: socket.id, players: [],
-      state: 'lobby', gameMode: 'cards',
-      tableCard: null, lastPlayedCards: null,
-      lastBid: null, targetRank: null,
-      currentPlayerIdx: null, lastActorIdx: null,
-      roundNumber: 0, log: [], resolving: false,
-    };
-    rooms.set(code, room);
-    addPlayerToRoom(room, name);
-    currentRoomCode = code;
-    socket.emit('roomJoined', { code });
-    broadcastRoom(room);
+  socket.on('createGame', ({ username }) => {
+    createRoom(socket, cleanName(username));
   });
 
-  socket.on('joinRoom', ({ code, name }) => {
-    code = (code || '').toUpperCase().trim();
-    name = sanitizeName(name);
-    const room = rooms.get(code);
-    if (!room) return socket.emit('errorMsg', 'Room not found.');
-    if (room.state !== 'lobby') return socket.emit('errorMsg', 'Game already in progress.');
-    if (room.players.length >= MAX_PLAYERS) return socket.emit('errorMsg', 'Room is full.');
-    addPlayerToRoom(room, name);
-    currentRoomCode = code;
-    socket.emit('roomJoined', { code });
-    broadcastRoom(room);
+  socket.on('joinGame', ({ code, username, playerToken }) => {
+    const room = safeRoom(code);
+    if (!room) return socket.emit('notice', { type: 'error', message: 'No table with that code.' });
+    const returning = room.players.find((p) => p.token === playerToken);
+    if (returning) return reconnect(socket, room, returning);
+    return joinRoom(socket, room, cleanName(username));
   });
 
-  socket.on('setGameMode', ({ mode }) => {
-    const room = getRoom();
-    if (!room || room.hostId !== socket.id || room.state !== 'lobby') return;
-    if (!games[mode]) return;
-    if (room.gameMode === mode) return;
-    room.gameMode = mode;
-    const labels = { cards: "Liar's Cards", dice: "Liar's Dice", poker: 'Bluff Poker' };
-    addLog(room, `Mode set to ${labels[mode]}.`, 'system');
-    broadcastRoom(room);
+  socket.on('rejoinGame', ({ code, playerToken }) => {
+    const room = safeRoom(code);
+    const player = room?.players.find((p) => p.token === playerToken);
+    if (!room || !player) return socket.emit('notice', { type: 'error', message: 'Could not restore that seat.' });
+    reconnect(socket, room, player);
+  });
+
+  socket.on('setReady', ({ ready }) => {
+    const ref = socketIndex.get(socket.id);
+    const room = ref && rooms.get(ref.roomCode);
+    const player = room?.players.find((p) => p.id === ref.playerId);
+    if (!room || !player || room.state !== 'lobby') return;
+    player.ready = Boolean(ready);
+    emitRoom(room);
   });
 
   socket.on('startGame', () => {
-    const room = getRoom();
-    if (!room) return;
-    if (room.hostId !== socket.id) return socket.emit('errorMsg', 'Only the host can start.');
-    if (room.players.length < MIN_PLAYERS) return socket.emit('errorMsg', `Need at least ${MIN_PLAYERS} players.`);
+    const ref = socketIndex.get(socket.id);
+    const room = ref && rooms.get(ref.roomCode);
+    if (!room || room.hostId !== ref.playerId) return socket.emit('notice', { type: 'error', message: 'Only the host can start.' });
     if (room.state !== 'lobby') return;
+    if (room.players.length < MIN_PLAYERS) return socket.emit('notice', { type: 'error', message: `Need at least ${MIN_PLAYERS} players.` });
+    if (!room.players.every((p) => p.ready || p.id === room.hostId)) {
+      return socket.emit('notice', { type: 'error', message: 'Everyone must be ready first.' });
+    }
     room.state = 'playing';
-    for (const p of room.players) {
-      p.alive = true;
-      p.shotsFired = 0;
-      p.bulletPos = Math.floor(Math.random() * 6);
+    room.winnerId = null;
+    room.round = 0;
+    for (const player of room.players) {
+      player.alive = true;
+      player.lives = STARTING_LIVES;
+      player.hand = [];
+      player.ready = false;
     }
-    const labels = { cards: "Liar's Cards", dice: "Liar's Dice", poker: 'Bluff Poker' };
-    addLog(room, `${labels[room.gameMode]} — game start`, 'event');
-    games[room.gameMode].init(room);
-    games[room.gameMode].startRound(room);
+    log(room, 'The doors lock. Last Call begins.', 'event');
+    startRound(room);
+    emitRoom(room);
   });
 
-  socket.on('resetGame', () => {
-    const room = getRoom();
-    if (!room || room.hostId !== socket.id || room.state !== 'finished') return;
+  socket.on('playCards', ({ indices }) => {
+    const ref = socketIndex.get(socket.id);
+    const room = ref && rooms.get(ref.roomCode);
+    const player = room?.players.find((p) => p.id === ref.playerId);
+    if (!room || !player || room.state !== 'playing' || room.resolving) return;
+    if (room.currentTurnId !== player.id) return socket.emit('notice', { type: 'error', message: 'Not your turn.' });
+    if (!player.alive) return socket.emit('notice', { type: 'error', message: 'You are spectating.' });
+    if (!Array.isArray(indices) || indices.length < 1 || indices.length > 3) {
+      return socket.emit('notice', { type: 'error', message: 'Play one to three cards.' });
+    }
+    const unique = [...new Set(indices)].filter((i) => Number.isInteger(i) && i >= 0 && i < player.hand.length);
+    if (unique.length !== indices.length) return socket.emit('notice', { type: 'error', message: 'Invalid card selection.' });
+    unique.sort((a, b) => b - a);
+    const played = unique.map((i) => player.hand.splice(i, 1)[0]);
+    room.lastClaim = {
+      by: player.id,
+      name: player.name,
+      count: played.length,
+      cards: played,
+      rank: room.claimRank,
+    };
+    room.currentTurnId = nextAliveAfter(room, player.id);
+    log(room, `${player.name} slides ${played.length} card${played.length > 1 ? 's' : ''} as ${room.claimRank}.`, 'play', {
+      playerId: player.id,
+      count: played.length,
+      rank: room.claimRank,
+    });
+    emitRoom(room);
+  });
+
+  socket.on('callBluff', () => {
+    const ref = socketIndex.get(socket.id);
+    const room = ref && rooms.get(ref.roomCode);
+    const caller = room?.players.find((p) => p.id === ref.playerId);
+    if (!room || !caller || room.state !== 'playing' || room.resolving) return;
+    if (room.currentTurnId !== caller.id) return socket.emit('notice', { type: 'error', message: 'Not your turn.' });
+    if (!room.lastClaim) return socket.emit('notice', { type: 'error', message: 'There is no claim to challenge.' });
+    const accused = room.players.find((p) => p.id === room.lastClaim.by);
+    if (!accused) return;
+    const truthful = room.lastClaim.cards.every((card) => card.wild || card.rank === room.lastClaim.rank);
+    const loser = truthful ? caller : accused;
+    const revealed = room.lastClaim.cards.map((card) => ({ rank: card.rank, wild: card.wild }));
+    room.resolving = true;
+    log(room, `${caller.name} calls the bluff on ${accused.name}.`, 'challenge', { callerId: caller.id, accusedId: accused.id });
+    log(room, truthful ? 'The claim holds.' : 'The lie cracks open.', truthful ? 'truth' : 'lie', { cards: revealed, rank: room.lastClaim.rank });
+    io.to(room.code).emit('reveal', {
+      callerId: caller.id,
+      accusedId: accused.id,
+      loserId: loser.id,
+      truthful,
+      rank: room.lastClaim.rank,
+      cards: revealed,
+    });
+    applyPenalty(room, loser, truthful ? 'the call was wrong' : 'the bluff was caught');
+    emitRoom(room);
+    setTimeout(() => {
+      const latest = rooms.get(room.code);
+      if (!latest || latest.state !== 'playing') return;
+      if (maybeFinish(latest)) return emitRoom(latest);
+      startRound(latest, loser.alive ? loser.id : nextAliveAfter(latest, loser.id));
+      emitRoom(latest);
+    }, 3200);
+  });
+
+  socket.on('returnToLobby', () => {
+    const ref = socketIndex.get(socket.id);
+    const room = ref && rooms.get(ref.roomCode);
+    if (!room || room.hostId !== ref.playerId || room.state !== 'finished') return;
     room.state = 'lobby';
-    for (const p of room.players) {
-      p.alive = true;
-      p.hand = [];
-      p.dice = [];
-      p.shotsFired = 0;
-      p.disconnected = false;
+    room.winnerId = null;
+    room.currentTurnId = null;
+    room.lastClaim = null;
+    room.claimRank = null;
+    room.resolving = false;
+    for (const player of room.players) {
+      player.alive = true;
+      player.lives = STARTING_LIVES;
+      player.hand = [];
+      player.ready = player.id === room.hostId;
     }
-    room.tableCard = null;
-    room.lastPlayedCards = null;
-    room.lastBid = null;
-    room.targetRank = null;
-    room.currentPlayerIdx = null;
-    room.lastActorIdx = null;
-    room.roundNumber = 0;
-    addLog(room, 'Back to lobby.', 'system');
-    broadcastRoom(room);
+    log(room, 'Fresh glasses. New table.', 'system');
+    emitRoom(room);
   });
 
-  socket.on('gameAction', ({ action, payload }) => {
-    const room = getRoom();
-    if (!room || room.state !== 'playing' || room.resolving) return;
-    const mode = games[room.gameMode];
-    if (!mode) return;
-    if (action === 'play') mode.handlePlay(room, socket, payload || {});
-    else if (action === 'liar') mode.handleLiar(room, socket);
-    else if (action === 'spoton' && mode.handleSpotOn) mode.handleSpotOn(room, socket);
+  socket.on('leaveGame', () => {
+    handleDisconnect(socket);
   });
 
-  socket.on('leaveRoom', () => handleLeave());
-  socket.on('disconnect', () => handleLeave());
-
-  function handleLeave() {
-    const room = getRoom();
-    if (!room) return;
-    const idx = room.players.findIndex(p => p.id === socket.id);
-    if (idx === -1) return;
-    const player = room.players[idx];
-
-    if (room.state === 'lobby' || room.state === 'finished') {
-      room.players.splice(idx, 1);
-      addLog(room, `${player.name} left.`, 'system');
-      if (room.players.length === 0) {
-        rooms.delete(room.code);
-        currentRoomCode = null;
-        return;
-      }
-      if (room.hostId === socket.id) {
-        room.hostId = room.players[0].id;
-        addLog(room, `${room.players[0].name} is now the host.`, 'system');
-      }
-      broadcastRoom(room);
-    } else {
-      player.disconnected = true;
-      player.alive = false;
-      addLog(room, `${player.name} disconnected.`, 'system');
-      const survivors = room.players.filter(p => p.alive);
-      if (survivors.length <= 1) {
-        room.state = 'finished';
-        if (survivors.length === 1) addLog(room, `${survivors[0].name} wins the bar!`, 'win');
-      } else if (idx === room.currentPlayerIdx) {
-        room.currentPlayerIdx = nextAlivePlayer(room, idx);
-      }
-      broadcastRoom(room);
-    }
-    currentRoomCode = null;
-  }
+  socket.on('disconnect', () => handleDisconnect(socket));
 });
 
 server.listen(PORT, () => {
-  console.log(`Liar's Bar listening on port ${PORT}`);
+  console.log(`Last Call listening on port ${PORT}`);
 });

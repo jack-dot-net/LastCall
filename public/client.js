@@ -1,880 +1,442 @@
-const socket = io();
+const socket = io({ reconnectionAttempts: Infinity, timeout: 12000 });
+
+const $ = (id) => document.getElementById(id);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+const STORAGE = {
+  name: 'lastcall.name',
+  code: 'lastcall.code',
+  token: 'lastcall.playerToken',
+  settings: 'lastcall.settings',
+};
+
+const DEFAULT_SETTINGS = {
+  sound: true,
+  music: true,
+  reducedMotion: false,
+  fullscreen: false,
+  actionLog: true,
+  cinematicDark: true,
+};
+
+const SETTING_META = [
+  ['sound', 'Sound effects', 'Subtle table feedback and challenge cues.'],
+  ['music', 'Music', 'Ambient room tone. Browser autoplay rules may keep this silent until interaction.'],
+  ['reducedMotion', 'Reduced motion', 'Minimizes smoke, reveals, and hover movement.'],
+  ['fullscreen', 'Fullscreen mode', 'Expands Last Call when supported by your browser.'],
+  ['actionLog', 'Action log visibility', 'Shows or hides the live table feed.'],
+  ['cinematicDark', 'Cinematic dark mode', 'Deepens shadows and warm amber contrast.'],
+];
+
 let state = null;
-let selectedCards = new Set();
-let bidQty = 1;
-let bidFace = 2;
+let selected = new Set();
+let settings = loadSettings();
+let audioCtx = null;
+let musicNodes = null;
 
-const SUITS_LIARS = { King: '♛', Queen: '♕', Ace: '♠', Joker: '★' };
-const SUITS_POKER = { S: '♠', H: '♥', D: '♦', C: '♣' };
-const PIP_LAYOUTS = {
-  1: [[2,2]],
-  2: [[1,1],[3,3]],
-  3: [[1,1],[2,2],[3,3]],
-  4: [[1,1],[1,3],[3,1],[3,3]],
-  5: [[1,1],[1,3],[2,2],[3,1],[3,3]],
-  6: [[1,1],[1,3],[2,1],[2,3],[3,1],[3,3]],
-};
-const MODE_LABELS = { cards: "Liar's Cards", dice: "Liar's Dice", poker: 'Poker' };
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+}
 
-function $(id) { return document.getElementById(id); }
-function showScreen(name) {
-  for (const s of ['menu', 'lobby', 'game', 'gameover']) {
-    $('screen-' + s).classList.toggle('active', s === name);
-  }
-  if (name !== 'game') {
-    document.body.classList.remove('my-turn');
-    document.body.classList.remove('spectating');
+function save(key, value) {
+  try { localStorage.setItem(key, value); } catch {}
+}
+
+function read(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function loadSettings() {
+  try {
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(STORAGE.settings) || '{}') };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
   }
 }
-function toast(msg, ms = 2400) {
+
+function persistSettings() {
+  save(STORAGE.settings, JSON.stringify(settings));
+}
+
+function toast(message) {
   const el = $('toast');
-  el.textContent = msg;
-  el.style.display = 'block';
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.style.display = 'none'; }, ms);
-}
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function rankName(r) { return ({11:'J',12:'Q',13:'K',14:'A'})[r] || String(r); }
-function pokerCardLabel(c) {
-  if (!c) return '?';
-  if (c.joker) return 'Joker';
-  return `${rankName(c.rank)}${SUITS_POKER[c.suit] || ''}`;
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove('show'), 2600);
 }
 
-function loadName() { try { return localStorage.getItem('liarsbar.name') || ''; } catch { return ''; } }
-function saveName(n) { try { localStorage.setItem('liarsbar.name', n); } catch {} }
+function beep(kind = 'tap') {
+  if (!settings.sound) return;
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const map = { tap: 220, challenge: 94, truth: 330, lie: 140 };
+    osc.frequency.value = map[kind] || 220;
+    osc.type = kind === 'challenge' ? 'sawtooth' : 'triangle';
+    gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.045, audioCtx.currentTime + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.16);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.18);
+  } catch {}
+}
 
-const savedName = loadName();
-if (savedName) $('name-input').value = savedName;
-
-// ============================================================
-// SPRITES
-// ============================================================
-
-function makeDie(face, opts = {}) {
-  const die = document.createElement('div');
-  die.className = 'die' + (opts.rolling ? ' rolling' : '') + (opts.highlight ? ' highlight' : '') + (opts.dim ? ' dim' : '');
-  die.dataset.face = face;
-  const layout = PIP_LAYOUTS[face] || [];
-  for (const [r, c] of layout) {
-    const pip = document.createElement('div');
-    pip.className = 'pip';
-    pip.style.gridRow = r;
-    pip.style.gridColumn = c;
-    die.appendChild(pip);
+function ensureAudio() {
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  } catch {
+    return null;
   }
-  return die;
 }
 
-function makePokerCard(card, opts = {}) {
-  const div = document.createElement('div');
-  if (card && card.joker) {
-    div.className = 'poker-card joker'
-      + (opts.selected ? ' selected' : '')
-      + (opts.disabled ? ' disabled' : '')
-      + (opts.flipped ? ' flipped' : '');
-    div.innerHTML = `
-      <div class="pc-corner pc-top">JKR<br>★</div>
-      <div class="pc-center">★</div>
-      <div class="pc-corner pc-bot">JKR<br>★</div>
-    `;
-    return div;
-  }
-  const suitClass = `suit-${card.suit.toLowerCase()}`;
-  div.className = `poker-card ${suitClass}`
-    + (opts.selected ? ' selected' : '')
-    + (opts.disabled ? ' disabled' : '')
-    + (opts.flipped ? ' flipped' : '');
-  const suitChar = SUITS_POKER[card.suit];
-  const rn = rankName(card.rank);
-  div.innerHTML = `
-    <div class="pc-corner pc-top">${rn}<br>${suitChar}</div>
-    <div class="pc-center">${suitChar}</div>
-    <div class="pc-corner pc-bot">${rn}<br>${suitChar}</div>
+function startMusic() {
+  if (!settings.music || musicNodes) return;
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const low = ctx.createOscillator();
+  const fifth = ctx.createOscillator();
+  const gain = ctx.createGain();
+  const filter = ctx.createBiquadFilter();
+  low.type = 'sine';
+  fifth.type = 'triangle';
+  low.frequency.value = 55;
+  fifth.frequency.value = 82.41;
+  filter.type = 'lowpass';
+  filter.frequency.value = 420;
+  gain.gain.value = 0.018;
+  low.connect(filter);
+  fifth.connect(filter);
+  filter.connect(gain).connect(ctx.destination);
+  low.start();
+  fifth.start();
+  musicNodes = { low, fifth, gain };
+}
+
+function stopMusic() {
+  if (!musicNodes) return;
+  try {
+    musicNodes.gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.08);
+    musicNodes.low.stop(audioCtx.currentTime + 0.1);
+    musicNodes.fifth.stop(audioCtx.currentTime + 0.1);
+  } catch {}
+  musicNodes = null;
+}
+
+function showScreen(name) {
+  $$('.screen').forEach((screen) => screen.classList.remove('active'));
+  $(`screen-${name}`).classList.add('active');
+}
+
+function cardLabel(card) {
+  return card?.wild ? 'Ember' : card?.rank || '?';
+}
+
+function renderCard(card, index = null) {
+  const button = document.createElement(index === null ? 'div' : 'button');
+  button.className = `playing-card ${card?.wild ? 'wild' : `rank-${String(card?.rank || '').toLowerCase()}`} ${selected.has(index) ? 'selected' : ''}`;
+  button.innerHTML = `
+    <span>${escapeHtml(cardLabel(card))}</span>
+    <strong>${card?.wild ? '*' : card?.rank?.charAt(0) || '?'}</strong>
+    <small>${card?.wild ? 'wild' : 'Last Call'}</small>
   `;
-  return div;
+  if (index !== null) {
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      if (!isMyTurn()) return;
+      if (selected.has(index)) selected.delete(index);
+      else if (selected.size < 3) selected.add(index);
+      else return toast('You can play at most three cards.');
+      renderHand();
+      beep('tap');
+    });
+  }
+  return button;
 }
 
-function makeLiarsCard(name, opts = {}) {
-  const div = document.createElement('div');
-  div.className = `card card-${name.toLowerCase()}` + (opts.selected ? ' selected' : '') + (opts.disabled ? ' disabled' : '');
-  div.innerHTML = `<div class="card-rank">${name.toUpperCase()}</div><div class="card-suit">${SUITS_LIARS[name] || ''}</div>`;
-  return div;
+function isMyTurn() {
+  const me = state?.players.find((p) => p.id === state.you);
+  return Boolean(state && state.state === 'playing' && !state.resolving && me?.alive && state.currentTurnId === state.you);
 }
 
-function makeCardBack() {
-  const div = document.createElement('div');
-  div.className = 'card-back';
-  div.innerHTML = '<div class="back-pattern"></div>';
-  return div;
+function currentPlayer() {
+  return state?.players.find((p) => p.id === state.currentTurnId);
 }
 
-// ============================================================
-// MENU
-// ============================================================
-
-$('btn-create').onclick = () => {
-  const name = ($('name-input').value || '').trim() || 'Player';
-  saveName(name);
-  socket.emit('createRoom', { name });
-};
-$('btn-join').onclick = () => {
-  const name = ($('name-input').value || '').trim() || 'Player';
-  const code = ($('room-input').value || '').trim().toUpperCase();
-  if (!code) { toast('Enter a room code.'); return; }
-  saveName(name);
-  socket.emit('joinRoom', { code, name });
-};
-$('room-input').addEventListener('input', (e) => {
-  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-});
-$('room-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-join').click(); });
-$('name-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-create').click(); });
-
-// ============================================================
-// LOBBY
-// ============================================================
-
-$('btn-start').onclick = () => socket.emit('startGame');
-$('btn-leave').onclick = () => {
-  socket.emit('leaveRoom');
-  state = null;
-  showScreen('menu');
-};
-$('btn-copy-code').onclick = () => {
-  if (!state) return;
-  navigator.clipboard?.writeText(state.code).then(() => toast('Code copied!')).catch(() => toast('Copy failed.'));
-};
-document.querySelectorAll('.mode-btn').forEach(btn => {
-  btn.onclick = () => {
-    if (!state || state.yourId !== state.hostId) {
-      toast('Only the host can change mode.');
-      return;
-    }
-    socket.emit('setGameMode', { mode: btn.dataset.mode });
-  };
-});
-
-// ============================================================
-// GAME — CARDS
-// ============================================================
-
-$('btn-play-cards').onclick = () => {
-  const indices = [...selectedCards];
-  if (indices.length < 1 || indices.length > 3) { toast('Select 1–3 cards.'); return; }
-  socket.emit('gameAction', { action: 'play', payload: { indices } });
-  selectedCards.clear();
-};
-$('btn-liar-cards').onclick = () => socket.emit('gameAction', { action: 'liar' });
-
-// ============================================================
-// GAME — DICE
-// ============================================================
-
-$('qty-down').onclick = () => { if (bidQty > 1) { bidQty--; renderDiceControls(); } };
-$('qty-up').onclick = () => {
-  const max = state?.totalDiceInPlay || 60;
-  if (bidQty < max) { bidQty++; renderDiceControls(); }
-};
-$('btn-bid').onclick = () => {
-  socket.emit('gameAction', { action: 'play', payload: { qty: bidQty, face: bidFace } });
-};
-$('btn-liar-dice').onclick = () => socket.emit('gameAction', { action: 'liar' });
-$('btn-spoton-dice').onclick = () => socket.emit('gameAction', { action: 'spoton' });
-
-function bidVal(qty, face) { return qty * 7 + face; }
-
-function setDefaultDiceBid() {
-  if (!state) return;
-  if (state.lastBid) {
-    bidQty = state.lastBid.qty;
-    bidFace = state.lastBid.face;
-    if (bidFace < 6) bidFace++;
-    else { bidFace = 2; bidQty++; }
-  } else {
-    bidQty = Math.max(1, Math.floor((state.totalDiceInPlay || 5) / 3));
-    bidFace = 2;
+function applySettings() {
+  document.body.classList.toggle('reduced-motion', settings.reducedMotion);
+  document.body.classList.toggle('soft-dark', !settings.cinematicDark);
+  $('action-log-panel')?.classList.toggle('hidden', !settings.actionLog);
+  if (settings.music) startMusic();
+  else stopMusic();
+  persistSettings();
+  renderSettings();
+  if (settings.fullscreen && !document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.().catch(() => {
+      settings.fullscreen = false;
+      persistSettings();
+      renderSettings();
+    });
+  } else if (!settings.fullscreen && document.fullscreenElement) {
+    document.exitFullscreen?.();
   }
 }
 
-function renderDiceControls() {
-  $('qty-value').textContent = bidQty;
-  const picker = $('face-picker');
-  picker.innerHTML = '';
-  for (let f = 1; f <= 6; f++) {
-    const btn = document.createElement('button');
-    btn.className = 'face-btn' + (f === bidFace ? ' active' : '');
-    btn.appendChild(makeDie(f));
-    if (f === 1) {
-      const wild = document.createElement('div');
-      wild.className = 'wild-tag';
-      wild.textContent = 'WILD';
-      btn.appendChild(wild);
-    }
-    btn.onclick = () => { bidFace = f; renderDiceControls(); };
-    picker.appendChild(btn);
+function renderSettings() {
+  const list = $('settings-list');
+  if (!list) return;
+  list.innerHTML = '';
+  for (const [key, title, desc] of SETTING_META) {
+    const row = document.createElement('label');
+    row.className = 'setting-row';
+    row.innerHTML = `
+      <span>
+        <strong>${title}</strong>
+        <small>${desc}</small>
+      </span>
+      <input class="switch-input" type="checkbox" ${settings[key] ? 'checked' : ''} aria-label="${title}">
+      <i class="switch" aria-hidden="true"></i>
+    `;
+    const input = row.querySelector('input');
+    input.addEventListener('change', () => {
+      settings[key] = input.checked;
+      ensureAudio();
+      applySettings();
+    });
+    list.appendChild(row);
   }
-  const bidBtn = $('btn-bid');
-  const myIdx = state ? state.players.findIndex(p => p.id === state.yourId) : -1;
-  const myTurn = state && myIdx === state.currentPlayerIdx && state.players[myIdx]?.alive;
-  let legal = true;
-  if (state?.lastBid) legal = bidVal(bidQty, bidFace) > bidVal(state.lastBid.qty, state.lastBid.face);
-  if (state?.totalDiceInPlay && bidQty > state.totalDiceInPlay) legal = false;
-  bidBtn.disabled = !myTurn || !legal;
-  $('btn-liar-dice').disabled = !myTurn || !state?.lastBid;
-  $('btn-spoton-dice').disabled = !myTurn || !state?.lastBid;
-}
-
-// ============================================================
-// GAME — POKER  (Liar's-Bar style: target rank, face-down play)
-// ============================================================
-
-$('btn-play-poker').onclick = () => {
-  const indices = [...selectedCards];
-  if (indices.length < 1 || indices.length > 3) { toast('Select 1–3 cards.'); return; }
-  socket.emit('gameAction', { action: 'play', payload: { indices } });
-  selectedCards.clear();
-};
-$('btn-liar-poker').onclick = () => socket.emit('gameAction', { action: 'liar' });
-
-// ============================================================
-// GAME OVER
-// ============================================================
-
-$('btn-new-game').onclick = () => socket.emit('resetGame');
-$('btn-back-menu').onclick = () => {
-  socket.emit('leaveRoom');
-  state = null;
-  showScreen('menu');
-};
-
-// ============================================================
-// SOCKETS
-// ============================================================
-
-socket.on('connect_error', () => toast('Connection lost. Refresh.'));
-socket.on('errorMsg', (msg) => toast(msg));
-socket.on('roomJoined', () => {});
-socket.on('roomUpdate', (s) => {
-  state = s;
-  render();
-});
-socket.on('reveal', (data) => showReveal(data));
-socket.on('shot', (data) => showShot(data));
-
-// ============================================================
-// RENDER
-// ============================================================
-
-function render() {
-  if (!state) return;
-  if (state.state !== 'playing') {
-    document.body.classList.remove('my-turn');
-    document.body.classList.remove('spectating');
-  }
-  if (state.state === 'lobby') { showScreen('lobby'); renderLobby(); }
-  else if (state.state === 'playing') { showScreen('game'); renderGame(); }
-  else if (state.state === 'finished') { showScreen('gameover'); renderGameOver(); }
 }
 
 function renderLobby() {
-  $('room-code').textContent = state.code;
-  const ul = $('player-list');
-  ul.innerHTML = '';
-  for (const p of state.players) {
-    const li = document.createElement('li');
-    li.innerHTML = `<span>${escapeHtml(p.name)}${p.id === state.yourId ? ' (you)' : ''}</span>${p.id === state.hostId ? '<span class="host-tag">★ HOST</span>' : ''}`;
-    ul.appendChild(li);
-  }
-  document.querySelectorAll('.mode-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.mode === state.gameMode);
+  showScreen('lobby');
+  $('lobby-code').textContent = state.code;
+  $('player-count').textContent = `${state.players.length} / ${state.settings.maxPlayers}`;
+  const me = state.players.find((p) => p.id === state.you);
+  const allReady = state.players.length >= state.settings.minPlayers && state.players.every((p) => p.ready || p.id === state.hostId);
+  $('lobby-status').textContent = state.you === state.hostId
+    ? allReady ? 'The room is ready. Start whenever the tension feels right.' : 'Waiting for every guest to ready up.'
+    : 'Ready up, then wait for the host to start.';
+  $('ready-toggle').textContent = me?.ready ? 'Unready' : 'Ready';
+  $('ready-toggle').classList.toggle('is-ready', Boolean(me?.ready));
+  $('start-game').hidden = state.you !== state.hostId;
+  $('start-game').disabled = !allReady;
+
+  const list = $('lobby-players');
+  list.innerHTML = '';
+  state.players.forEach((player) => {
+    const row = document.createElement('div');
+    row.className = `lobby-player ${player.ready ? 'ready' : ''} ${!player.connected ? 'offline' : ''}`;
+    row.innerHTML = `
+      <div class="avatar">${escapeHtml(player.name.charAt(0).toUpperCase())}</div>
+      <div>
+        <strong>${escapeHtml(player.name)}${player.id === state.you ? ' (you)' : ''}</strong>
+        <span>${player.host ? 'Host' : player.ready ? 'Ready' : 'Not ready'}${player.connected ? '' : ' · reconnecting'}</span>
+      </div>
+    `;
+    list.appendChild(row);
   });
-  const modeHints = {
-    cards: 'Play cards face down claiming they match the table card. Bluff or be honest.',
-    dice: 'Bid total quantity × face across all hidden dice. 1s are wild.',
-    poker: '52-card deck plus wild Jokers. Play cards face down claiming they match the target rank.',
-  };
-  $('mode-hint').textContent = modeHints[state.gameMode] || '';
-  const isHost = state.yourId === state.hostId;
-  $('btn-start').style.display = isHost ? 'inline-block' : 'none';
-  $('btn-start').disabled = state.players.length < 2;
-  $('lobby-hint').textContent = isHost
-    ? (state.players.length < 2 ? 'Waiting for more players to join…' : 'Ready when you are.')
-    : 'Waiting for the host to start.';
-}
-
-function renderGame() {
-  $('mode-badge').textContent = MODE_LABELS[state.gameMode];
-
-  // Show only the active mode panel
-  $('game-cards').style.display = state.gameMode === 'cards' ? 'block' : 'none';
-  $('game-dice').style.display = state.gameMode === 'dice' ? 'block' : 'none';
-  $('game-poker').style.display = state.gameMode === 'poker' ? 'block' : 'none';
-
-  // Body class: are you the active player?
-  const meForTurn = state.players.find(p => p.id === state.yourId);
-  const myIdxForTurn = state.players.findIndex(p => p.id === state.yourId);
-  const myTurnFlag = myIdxForTurn === state.currentPlayerIdx && meForTurn && meForTurn.alive && !state.resolving;
-  document.body.classList.toggle('my-turn', !!myTurnFlag);
-  document.body.classList.toggle('spectating', !myTurnFlag);
-
-  renderPlayers();
-  renderCenter();
-
-  if (state.gameMode === 'cards') renderCardsMode();
-  else if (state.gameMode === 'dice') renderDiceMode();
-  else if (state.gameMode === 'poker') renderPokerMode();
-
-  renderLog();
 }
 
 function renderPlayers() {
-  const pa = $('players-area');
-  pa.innerHTML = '';
-  for (let i = 0; i < state.players.length; i++) {
-    const p = state.players[i];
-    const div = document.createElement('div');
-    div.className = 'player'
-      + (p.id === state.yourId ? ' me' : '')
-      + (i === state.currentPlayerIdx && p.alive ? ' current' : '')
-      + (!p.alive ? ' dead' : '')
-      + (p.disconnected ? ' disconnected' : '');
-
-    let chambersHtml = '<div class="chambers">';
-    for (let c = 0; c < p.chambers; c++) {
-      chambersHtml += `<span class="chamber${c < p.shotsFired ? ' fired' : ''}"></span>`;
-    }
-    chambersHtml += '</div>';
-
-    let countHtml = '';
-    if (state.gameMode === 'dice') {
-      countHtml = `<div class="player-count">🎲 × ${p.diceCount}</div>`;
-    } else if (state.gameMode === 'poker') {
-      countHtml = `<div class="player-count">♠ × ${p.handSize}</div>`;
-    } else {
-      countHtml = `<div class="player-count">🂠 × ${p.handSize}</div>`;
-    }
-
-    div.innerHTML = `
-      <div class="player-name">${escapeHtml(p.name)}${p.id === state.yourId ? ' (you)' : ''}</div>
-      ${countHtml}
-      <div class="player-gun">${chambersHtml}</div>
-      ${!p.alive ? '<div class="player-status-dead">💀</div>' : ''}
+  const root = $('players');
+  root.innerHTML = '';
+  state.players.forEach((player) => {
+    const item = document.createElement('article');
+    item.className = `seat ${player.id === state.you ? 'me' : ''} ${player.id === state.currentTurnId ? 'turn' : ''} ${!player.alive ? 'out' : ''} ${!player.connected ? 'offline' : ''}`;
+    const lives = Array.from({ length: state.settings.startingLives }, (_, i) => `<span class="${i < player.lives ? 'live' : ''}"></span>`).join('');
+    item.innerHTML = `
+      <div class="avatar">${escapeHtml(player.name.charAt(0).toUpperCase())}</div>
+      <strong>${escapeHtml(player.name)}</strong>
+      <small>${player.alive ? `${player.handCount} cards` : 'Spectating'}${player.connected ? '' : ' · offline'}</small>
+      <div class="lives" aria-label="${player.lives} lives">${lives}</div>
     `;
-    pa.appendChild(div);
-  }
+    root.appendChild(item);
+  });
 }
 
-function renderCenter() {
-  const cd = $('center-display');
-  cd.innerHTML = '';
-  const me = state.players.find(p => p.id === state.yourId);
-  const myIdx = state.players.findIndex(p => p.id === state.yourId);
-  const myTurn = myIdx === state.currentPlayerIdx && me && me.alive;
-  const current = state.players[state.currentPlayerIdx];
-
-  if (state.gameMode === 'cards') {
-    const tc = document.createElement('div');
-    tc.className = 'table-card-display';
-    tc.innerHTML = `<div class="ctr-label">TABLE CARD</div><div class="ctr-value">${state.tableCard ? state.tableCard.toUpperCase() : '?'}</div>`;
-    cd.appendChild(tc);
-    const pi = document.createElement('div');
-    pi.className = 'pile-info';
-    pi.textContent = state.lastPlayedCount > 0
-      ? `${state.lastPlayedCount} card${state.lastPlayedCount > 1 ? 's' : ''} face down`
-      : 'No cards played yet';
-    cd.appendChild(pi);
-  } else if (state.gameMode === 'dice') {
-    const bid = document.createElement('div');
-    bid.className = 'bid-display';
-    if (state.lastBid) {
-      bid.innerHTML = `<div class="ctr-label">CURRENT BID</div><div class="bid-line"><span class="bid-qty">${state.lastBid.qty}</span><span class="bid-x">×</span></div>`;
-      bid.appendChild(makeDie(state.lastBid.face, { highlight: true }));
-    } else {
-      bid.innerHTML = `<div class="ctr-label">CURRENT BID</div><div class="ctr-value">—</div>`;
-    }
-    cd.appendChild(bid);
-    const di = document.createElement('div');
-    di.className = 'pile-info';
-    di.textContent = `${state.totalDiceInPlay || 0} dice in play`;
-    cd.appendChild(di);
-  } else if (state.gameMode === 'poker') {
-    const tc = document.createElement('div');
-    tc.className = 'table-card-display';
-    const tn = state.targetRank ? rankName(state.targetRank) : '?';
-    tc.innerHTML = `<div class="ctr-label">TARGET RANK</div><div class="ctr-value">${tn === '?' ? '?' : tn + 's'}</div>`;
-    cd.appendChild(tc);
-    const pi = document.createElement('div');
-    pi.className = 'pile-info';
-    pi.textContent = state.lastPlayedCount > 0
-      ? `${state.lastPlayedCount} card${state.lastPlayedCount > 1 ? 's' : ''} face down`
-      : 'No cards played yet';
-    cd.appendChild(pi);
-  }
-
-  $('turn-info').textContent = current
-    ? (myTurn ? 'Your turn.' : `Waiting for ${current.name}…`)
-    : '';
-
-  const wpName = $('waiting-player');
-  if (wpName) wpName.textContent = current ? current.name : 'the table';
-}
-
-// ===== CARDS MODE =====
-function renderCardsMode() {
-  const me = state.players.find(p => p.id === state.yourId);
-  const myIdx = state.players.findIndex(p => p.id === state.yourId);
-  const myTurn = myIdx === state.currentPlayerIdx && me && me.alive;
-
-  const hand = $('hand-area');
+function renderHand() {
+  const hand = $('hand');
+  const panel = $('hand-panel');
+  const myTurn = isMyTurn();
+  const me = state.players.find((p) => p.id === state.you);
+  panel.classList.toggle('disabled-panel', !myTurn);
   hand.innerHTML = '';
-  const handCards = state.yourHand || [];
-  if (handCards.length === 0 && me && me.alive) {
-    hand.innerHTML = '<div class="hand-empty">Hand empty — you must call LIAR.</div>';
+  if (!me?.alive) {
+    hand.innerHTML = '<p class="muted">You are spectating. Keep reading the room.</p>';
+  } else if (!state.hand.length) {
+    hand.innerHTML = '<p class="muted">Your hand is empty. You must call bluff when your turn arrives.</p>';
+  } else {
+    state.hand.forEach((card, index) => hand.appendChild(renderCard(card, index)));
   }
-  for (let i = 0; i < handCards.length; i++) {
-    const card = handCards[i];
-    const selected = selectedCards.has(i);
-    const div = makeLiarsCard(card, { selected, disabled: !myTurn });
-    div.onclick = () => {
-      if (!myTurn) return;
-      if (selectedCards.has(i)) selectedCards.delete(i);
-      else if (selectedCards.size < 3) selectedCards.add(i);
-      else toast('Max 3 cards.');
-      renderCardsMode();
-    };
-    hand.appendChild(div);
-  }
-
-  const canPlay = myTurn && selectedCards.size > 0 && selectedCards.size <= 3 && handCards.length > 0;
-  const canLiar = myTurn && state.lastPlayedCount > 0 && state.lastActorIdx !== null;
-  $('btn-play-cards').disabled = !canPlay;
-  $('btn-liar-cards').disabled = !canLiar;
+  $('play-selected').disabled = !myTurn || selected.size < 1 || selected.size > 3;
+  $('call-bluff').disabled = !myTurn || !state.lastClaim;
 }
 
-// ===== DICE MODE =====
-function renderDiceMode() {
-  const myIdx = state.players.findIndex(p => p.id === state.yourId);
-  const myTurn = myIdx === state.currentPlayerIdx && state.players[myIdx]?.alive;
-  const da = $('dice-area');
-  da.innerHTML = '';
-  const myDice = state.yourDice || [];
-  const lbl = document.createElement('div');
-  lbl.className = 'your-label';
-  lbl.textContent = myDice.length ? 'Your dice (hidden from others):' : 'No dice — you are out.';
-  da.appendChild(lbl);
-  const tray = document.createElement('div');
-  tray.className = 'dice-tray';
-  for (const d of myDice) tray.appendChild(makeDie(d));
-  da.appendChild(tray);
-
-  // Auto-bump bid defaults when it becomes your turn
-  if (myTurn) {
-    if (state.lastBid) {
-      const min = bidVal(state.lastBid.qty, state.lastBid.face) + 1;
-      if (bidVal(bidQty, bidFace) < min) setDefaultDiceBid();
-    } else if (bidQty < 1) {
-      setDefaultDiceBid();
-    }
-  }
-
-  renderDiceControls();
+function renderGame() {
+  showScreen('game');
+  $('round-number').textContent = state.round;
+  $('claim-rank').textContent = state.claimRank || '?';
+  const turn = currentPlayer();
+  $('turn-player').textContent = turn ? turn.name : 'Waiting';
+  $('turn-hint').textContent = isMyTurn() ? 'Your move. Sell it clean or call it cold.' : turn ? `Waiting on ${turn.name}.` : '';
+  $('last-claim').textContent = state.lastClaim ? `${state.lastClaim.name}: ${state.lastClaim.count} as ${state.lastClaim.rank}` : 'No claim yet';
+  renderPlayers();
+  renderHand();
+  renderLog();
+  $('action-log-panel').classList.toggle('hidden', !settings.actionLog);
 }
 
-// ===== POKER MODE =====
-function renderPokerMode() {
-  const me = state.players.find(p => p.id === state.yourId);
-  const myIdx = state.players.findIndex(p => p.id === state.yourId);
-  const myTurn = myIdx === state.currentPlayerIdx && me && me.alive;
-
-  const pa = $('poker-hand-area');
-  pa.innerHTML = '';
-  const myHand = state.yourHand || [];
-  const lbl = document.createElement('div');
-  lbl.className = 'your-label';
-  lbl.textContent = myHand.length ? 'Your cards (hidden from others):' : 'No cards — you are out.';
-  pa.appendChild(lbl);
-  const tray = document.createElement('div');
-  tray.className = 'poker-tray';
-  if (myHand.length === 0 && me && me.alive) {
-    const empty = document.createElement('div');
-    empty.className = 'hand-empty';
-    empty.textContent = 'Hand empty — you must call LIAR.';
-    tray.appendChild(empty);
-  }
-  for (let i = 0; i < myHand.length; i++) {
-    const card = myHand[i];
-    const selected = selectedCards.has(i);
-    const div = makePokerCard(card, { selected, disabled: !myTurn });
-    div.onclick = () => {
-      if (!myTurn) return;
-      if (selectedCards.has(i)) selectedCards.delete(i);
-      else if (selectedCards.size < 3) selectedCards.add(i);
-      else toast('Max 3 cards.');
-      renderPokerMode();
-    };
-    tray.appendChild(div);
-  }
-  pa.appendChild(tray);
-
-  const canPlay = myTurn && selectedCards.size > 0 && selectedCards.size <= 3 && myHand.length > 0;
-  const canLiar = myTurn && state.lastPlayedCount > 0 && state.lastActorIdx !== null;
-  $('btn-play-poker').disabled = !canPlay;
-  $('btn-liar-poker').disabled = !canLiar;
+function renderFinished() {
+  showScreen('finished');
+  const winner = state.players.find((p) => p.id === state.winnerId);
+  $('winner-text').textContent = winner ? `${winner.name} wins Last Call.` : 'No one made it to closing time.';
+  $('play-again').hidden = state.you !== state.hostId;
+  renderLog();
 }
 
-let _lastLogTime = 0;
 function renderLog() {
-  const log = $('log');
-  log.innerHTML = '';
-  const entries = state.log.slice(-25);
-
-  for (const entry of entries) {
-    const el = makeLogEntry(entry);
-    if (entry.time > _lastLogTime) el.classList.add('fresh');
-    log.appendChild(el);
+  const root = $('action-log');
+  if (!root) return;
+  root.innerHTML = '';
+  for (const entry of state.log.slice(-36)) {
+    const row = document.createElement('p');
+    row.className = `log-entry ${entry.type}`;
+    row.textContent = entry.text;
+    root.appendChild(row);
   }
-  _lastLogTime = entries.length ? entries[entries.length - 1].time : _lastLogTime;
-  requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
+  root.scrollTop = root.scrollHeight;
 }
 
-// --- Mini sprite builders for log entries ---
-function elem(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
-  return e;
+function render() {
+  if (!state) return;
+  selected = new Set([...selected].filter((index) => index < state.hand.length));
+  if (state.state === 'lobby') renderLobby();
+  if (state.state === 'playing') renderGame();
+  if (state.state === 'finished') renderFinished();
 }
-
-function makePlayerChip(name, extra = '') {
-  const c = elem('span', 'player-chip ' + extra, name || '');
-  return c;
-}
-
-function makeMiniCardBack() {
-  return elem('span', 'mini-card-back');
-}
-
-function makeMiniLiarsCard(name) {
-  const c = elem('span', `mini-liars-card mc-${(name || '').toLowerCase()}`);
-  c.textContent = name === 'Joker' ? '★' : (name || '?').charAt(0);
-  return c;
-}
-
-function makeMiniPokerCard(card) {
-  if (!card) return elem('span', 'mini-poker-card');
-  if (card.joker) {
-    const c = elem('span', 'mini-poker-card joker', '★');
-    return c;
-  }
-  const c = elem('span', `mini-poker-card suit-${(card.suit || '').toLowerCase()}`);
-  c.innerHTML = `<span class="mpc-rank">${rankName(card.rank)}</span><span class="mpc-suit">${SUITS_POKER[card.suit] || ''}</span>`;
-  return c;
-}
-
-function makeRankChip(rank) {
-  return elem('span', 'rank-chip', rankName(rank) + 's');
-}
-
-function makeRevolverIcon(opts = {}) {
-  const div = elem('span', 'revolver-icon' + (opts.smoke ? ' smoke' : '') + (opts.fired ? ' fired' : ''));
-  div.innerHTML = `<svg viewBox="0 0 32 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <rect x="10" y="7.5" width="13" height="2.5" fill="#3a3a3a" stroke="#1a1a1a" stroke-width="0.3"/>
-    <rect x="22.5" y="6.8" width="2.5" height="4" fill="#222"/>
-    <circle cx="6" cy="9" r="4.6" fill="#5a5a5a" stroke="#1a1a1a" stroke-width="0.5"/>
-    <circle cx="6" cy="9" r="3.4" fill="#3a3a3a"/>
-    <circle cx="4.4" cy="7.4" r="0.55" fill="#0a0604"/>
-    <circle cx="7.6" cy="7.4" r="0.55" fill="#0a0604"/>
-    <circle cx="4.4" cy="10.6" r="0.55" fill="#0a0604"/>
-    <circle cx="7.6" cy="10.6" r="0.55" fill="#0a0604"/>
-    <circle cx="6" cy="9" r="0.7" fill="#0a0604"/>
-    <path d="M 4.8 13 L 8.2 13 L 9 16 L 4 16 Z" fill="#6b4423" stroke="#3a2010" stroke-width="0.3"/>
-  </svg>`;
-  return div;
-}
-
-function makeChamberRow(chambersLeft, total = 6) {
-  const row = elem('span', 'log-chamber-row');
-  const fired = total - chambersLeft;
-  for (let i = 0; i < total; i++) {
-    row.appendChild(elem('span', 'log-chamber-dot' + (i < fired ? ' fired' : '')));
-  }
-  return row;
-}
-
-function makeStamp(text, kind) {
-  return elem('span', `stamp stamp-${kind}`, text);
-}
-
-function makeBidBanner(qty, face) {
-  const b = elem('span', 'bid-banner');
-  b.appendChild(elem('span', 'bb-qty', String(qty)));
-  b.appendChild(elem('span', 'bb-mult', '×'));
-  b.appendChild(makeDie(face));
-  if (face === 1) b.appendChild(elem('span', 'bb-wild', 'WILD'));
-  return b;
-}
-
-function makeClaimBanner(cardSprites, claimSprite) {
-  const b = elem('span', 'claim-banner');
-  const row = elem('span', 'cb-row');
-  for (const c of cardSprites) row.appendChild(c);
-  b.appendChild(row);
-  b.appendChild(elem('span', 'cb-arrow', '⇒'));
-  b.appendChild(claimSprite);
-  return b;
-}
-
-function makeRoundBanner(n) {
-  const b = elem('span', 'round-banner');
-  b.appendChild(elem('span', 'rb-flourish', '✦'));
-  b.appendChild(elem('span', 'rb-text', `Round ${n}`));
-  b.appendChild(elem('span', 'rb-flourish', '✦'));
-  return b;
-}
-
-function makeMuzzleFlash() {
-  return elem('span', 'muzzle-flash');
-}
-
-function makeSmokeWisp() {
-  const w = elem('span', 'smoke-wisp');
-  w.innerHTML = '<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M3 16 Q 6 10, 10 14 T 18 8" stroke="#bbb" stroke-width="1.8" fill="none" stroke-linecap="round" opacity="0.7"/></svg>';
-  return w;
-}
-
-function makePointerArrows() {
-  const p = elem('span', 'pointer-arrows');
-  p.innerHTML = '<span>▸</span><span>▸</span><span>▸</span>';
-  return p;
-}
-
-function makeSkull() {
-  return elem('span', 'log-skull-icon', '💀');
-}
-
-function makeCrown() {
-  return elem('span', 'log-crown-icon', '👑');
-}
-
-function makeLogEntry(entry) {
-  const div = document.createElement('div');
-  div.className = `log-entry log-${entry.type}`;
-  const data = entry.data || {};
-
-  switch (entry.type) {
-    case 'round': {
-      const n = data.round || (entry.msg.match(/\d+/) || ['?'])[0];
-      div.appendChild(makeRoundBanner(n));
-      break;
-    }
-    case 'round-info': {
-      if (data.mode === 'cards' && data.tableCard) {
-        const big = makeMiniLiarsCard(data.tableCard);
-        big.classList.add('mlc-large');
-        div.appendChild(big);
-      } else if (data.mode === 'poker' && data.targetRank) {
-        const big = makeRankChip(data.targetRank);
-        big.classList.add('rank-chip-large');
-        div.appendChild(big);
-      } else if (data.mode === 'dice') {
-        const tray = elem('span', 'log-cards-row log-dice-rolled');
-        tray.appendChild(makeDie(2));
-        tray.appendChild(makeDie(5));
-        tray.appendChild(makeDie(3));
-        div.appendChild(tray);
-      } else {
-        div.appendChild(elem('span', 'log-mini-text', entry.msg));
-      }
-      break;
-    }
-    case 'event': {
-      const banner = elem('span', 'log-event-banner');
-      banner.appendChild(elem('span', 'eb-flourish', '✦'));
-      banner.appendChild(elem('span', 'eb-text', entry.msg));
-      banner.appendChild(elem('span', 'eb-flourish', '✦'));
-      div.appendChild(banner);
-      break;
-    }
-    case 'turn': {
-      div.appendChild(makePlayerChip(data.player || ''));
-      div.appendChild(makePointerArrows());
-      break;
-    }
-    case 'play': {
-      div.appendChild(makePlayerChip(data.player || ''));
-      if (data.mode === 'dice') {
-        div.appendChild(makeBidBanner(data.qty, data.face));
-      } else if (data.mode === 'cards') {
-        const cardBacks = [];
-        for (let i = 0; i < Math.min(data.count || 1, 3); i++) cardBacks.push(makeMiniCardBack());
-        div.appendChild(makeClaimBanner(cardBacks, makeMiniLiarsCard(data.tableCard)));
-      } else if (data.mode === 'poker') {
-        const cardBacks = [];
-        for (let i = 0; i < Math.min(data.count || 1, 3); i++) cardBacks.push(makeMiniCardBack());
-        div.appendChild(makeClaimBanner(cardBacks, makeRankChip(data.targetRank)));
-      }
-      break;
-    }
-    case 'liar': {
-      div.appendChild(makePlayerChip(data.caller || '', 'log-player-caller'));
-      div.appendChild(elem('span', 'liar-bolt log-icon', '⚡'));
-      div.appendChild(makeStamp('LIAR', 'liar'));
-      div.appendChild(elem('span', 'liar-bolt log-icon', '⚡'));
-      div.appendChild(makePlayerChip(data.accused || '', 'log-player-accused'));
-      break;
-    }
-    case 'spoton': {
-      div.appendChild(makePlayerChip(data.caller || '', 'log-player-caller'));
-      div.appendChild(elem('span', 'spoton-target log-icon', '🎯'));
-      div.appendChild(makeStamp('SPOT ON', 'spoton'));
-      div.appendChild(elem('span', 'spoton-target log-icon', '🎯'));
-      div.appendChild(makePlayerChip(data.accused || '', 'log-player-accused'));
-      break;
-    }
-    case 'verdict-truth':
-    case 'verdict-lie': {
-      const truth = entry.type === 'verdict-truth';
-      div.appendChild(makeStamp(truth ? 'TRUTH' : 'LIE', truth ? 'truth' : 'lie'));
-      if (data.mode === 'dice') {
-        div.appendChild(makeBidBanner(data.qty, data.face));
-        div.appendChild(elem('span', 'log-eq', '='));
-        div.appendChild(elem('span', 'log-found-num', String(data.count)));
-      } else if (data.mode === 'cards' && Array.isArray(data.cards)) {
-        const tray = elem('span', 'log-cards-row');
-        for (const c of data.cards) tray.appendChild(makeMiniLiarsCard(c));
-        div.appendChild(tray);
-      } else if (data.mode === 'poker' && Array.isArray(data.cards)) {
-        const tray = elem('span', 'log-cards-row');
-        for (const c of data.cards) tray.appendChild(makeMiniPokerCard(c));
-        div.appendChild(tray);
-      }
-      break;
-    }
-    case 'tension': {
-      div.appendChild(makeRevolverIcon());
-      div.appendChild(makePlayerChip(data.player || ''));
-      const dots = elem('span', 'tension-dots-anim');
-      dots.innerHTML = '<span></span><span></span><span></span>';
-      div.appendChild(dots);
-      break;
-    }
-    case 'dead': {
-      div.appendChild(makeRevolverIcon({ fired: true }));
-      div.appendChild(makeMuzzleFlash());
-      div.appendChild(makePlayerChip(data.player || '', 'log-player-dead'));
-      div.appendChild(makeSkull());
-      break;
-    }
-    case 'survive': {
-      div.appendChild(makeRevolverIcon({ smoke: true }));
-      div.appendChild(makeSmokeWisp());
-      div.appendChild(makePlayerChip(data.player || ''));
-      div.appendChild(makeChamberRow(data.chambersLeft || 0));
-      break;
-    }
-    case 'win': {
-      div.appendChild(elem('span', 'log-icon log-trophy', '🏆'));
-      div.appendChild(makePlayerChip(data.player || '', 'log-player-winner'));
-      div.appendChild(makeCrown());
-      break;
-    }
-    case 'system':
-    default: {
-      div.appendChild(elem('span', 'log-system-text', entry.msg));
-    }
-  }
-  return div;
-}
-
-function renderGameOver() {
-  const winner = state.players.find(p => p.alive);
-  $('winner').innerHTML = winner ? `🏆 ${escapeHtml(winner.name)} wins!` : 'No survivors.';
-  $('btn-new-game').style.display = (state.yourId === state.hostId) ? 'inline-block' : 'none';
-}
-
-// ============================================================
-// OVERLAYS
-// ============================================================
 
 function showReveal(data) {
-  const overlay = $('reveal-overlay');
-  const body = $('reveal-body');
-  const title = $('reveal-title');
-  body.innerHTML = '';
-  title.textContent = data.callType === 'spoton' ? 'SPOT ON CALLED!' : 'LIAR CALLED!';
-  title.classList.toggle('spot', data.callType === 'spoton');
-
-  if (data.mode === 'cards') {
-    const row = document.createElement('div');
-    row.className = 'reveal-cards-row';
-    for (const c of data.cards) row.appendChild(makeLiarsCard(c, { disabled: true }));
-    body.appendChild(row);
-    $('reveal-verdict').textContent = data.truthful
-      ? `All ${data.tableCard}s or Jokers — truthful.`
-      : `Not all ${data.tableCard}s — LIE.`;
-  } else if (data.mode === 'dice') {
-    const summary = document.createElement('div');
-    summary.className = 'reveal-summary';
-    summary.innerHTML = `Bid: <b>${data.qty} × ${data.face}</b> &nbsp;·&nbsp; Found: <b>${data.count}</b>`;
-    body.appendChild(summary);
-    const grid = document.createElement('div');
-    grid.className = 'reveal-dice-grid';
-    for (const pdata of data.allDice) {
-      const block = document.createElement('div');
-      block.className = 'reveal-player-block';
-      const nm = document.createElement('div');
-      nm.className = 'rev-name';
-      nm.textContent = pdata.name;
-      block.appendChild(nm);
-      const dt = document.createElement('div');
-      dt.className = 'dice-tray small';
-      for (const d of pdata.dice) {
-        dt.appendChild(makeDie(d, { highlight: (d === data.face || (d === 1 && data.face !== 1)), dim: !(d === data.face || (d === 1 && data.face !== 1)) }));
-      }
-      block.appendChild(dt);
-      grid.appendChild(block);
-    }
-    body.appendChild(grid);
-    if (data.callType === 'spoton') {
-      $('reveal-verdict').textContent = data.exact ? 'Exact hit — bidder pulls the trigger.' : `Off by ${Math.abs(data.count - data.qty)} — caller pulls the trigger.`;
-    } else {
-      $('reveal-verdict').textContent = data.bidMet ? 'Bid stands — challenger loses.' : 'Bid busts — bidder loses.';
-    }
-  } else if (data.mode === 'poker') {
-    const summary = document.createElement('div');
-    summary.className = 'reveal-summary';
-    summary.innerHTML = `Target rank: <b>${rankName(data.targetRank)}</b>`;
-    body.appendChild(summary);
-    const row = document.createElement('div');
-    row.className = 'reveal-cards-row';
-    for (const c of data.cards) row.appendChild(makePokerCard(c, { disabled: true, flipped: true }));
-    body.appendChild(row);
-    $('reveal-verdict').textContent = data.truthful
-      ? `All ${rankName(data.targetRank)}s or Jokers — truthful.`
-      : `Not all ${rankName(data.targetRank)}s — LIE.`;
-  }
-
-  overlay.style.display = 'flex';
-  const dur = (data.mode === 'cards') ? 2500 : 3500;
-  setTimeout(() => { overlay.style.display = 'none'; }, dur);
+  const overlay = $('reveal');
+  $('reveal-kicker').textContent = `${playerName(data.callerId)} challenged ${playerName(data.accusedId)}`;
+  $('reveal-title').textContent = data.truthful ? 'The claim was true' : 'The bluff was caught';
+  $('reveal-cards').innerHTML = '';
+  data.cards.forEach((card) => $('reveal-cards').appendChild(renderCard(card)));
+  $('reveal-result').textContent = `${playerName(data.loserId)} loses a life.`;
+  overlay.classList.remove('hidden');
+  beep(data.truthful ? 'truth' : 'lie');
+  clearTimeout(showReveal.timer);
+  showReveal.timer = setTimeout(() => overlay.classList.add('hidden'), 3000);
 }
 
-function showShot(data) {
-  const overlay = $('shot-overlay');
-  const box = $('shot-box');
-  if (data.died) {
-    box.className = 'shot-box';
-    box.textContent = '💥 BANG!';
-  } else {
-    box.className = 'shot-box click';
-    box.textContent = '*click*';
-  }
-  overlay.style.display = 'flex';
-  setTimeout(() => { overlay.style.display = 'none'; }, 1800);
+function playerName(id) {
+  return state?.players.find((p) => p.id === id)?.name || 'Someone';
 }
 
-// initialize controls
-renderDiceControls();
+function username() {
+  const name = $('username').value.trim() || 'The Regular';
+  save(STORAGE.name, name);
+  return name;
+}
+
+function normalizeCodeInput() {
+  $('game-code').value = $('game-code').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+}
+
+function restoreButton() {
+  const code = read(STORAGE.code);
+  const token = read(STORAGE.token);
+  $('restore-game').classList.toggle('hidden', !(code && token));
+}
+
+function bindEvents() {
+  document.addEventListener('pointerdown', () => {
+    ensureAudio();
+    if (settings.music) startMusic();
+  }, { once: true });
+  $('username').value = read(STORAGE.name) || '';
+  $('game-code').addEventListener('input', normalizeCodeInput);
+  $('create-game').addEventListener('click', () => socket.emit('createGame', { username: username() }));
+  $('join-game').addEventListener('click', () => {
+    normalizeCodeInput();
+    const code = $('game-code').value;
+    if (!code) return toast('Enter a game code.');
+    socket.emit('joinGame', { code, username: username(), playerToken: read(STORAGE.token) });
+  });
+  $('restore-game').addEventListener('click', () => socket.emit('rejoinGame', { code: read(STORAGE.code), playerToken: read(STORAGE.token) }));
+  $('copy-code').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(state.code);
+      toast('Code copied.');
+    } catch {
+      toast(`Code: ${state.code}`);
+    }
+  });
+  $('ready-toggle').addEventListener('click', () => {
+    const me = state.players.find((p) => p.id === state.you);
+    socket.emit('setReady', { ready: !me?.ready });
+  });
+  $('start-game').addEventListener('click', () => socket.emit('startGame'));
+  $('leave-lobby').addEventListener('click', leave);
+  $('leave-game').addEventListener('click', leave);
+  $('leave-finished').addEventListener('click', leave);
+  $('play-again').addEventListener('click', () => socket.emit('returnToLobby'));
+  $('play-selected').addEventListener('click', () => {
+    socket.emit('playCards', { indices: [...selected] });
+    selected.clear();
+  });
+  $('call-bluff').addEventListener('click', () => {
+    beep('challenge');
+    socket.emit('callBluff');
+  });
+  $$('[data-open-settings]').forEach((button) => button.addEventListener('click', () => $('settings-dialog').showModal()));
+  $$('[data-open-rules]').forEach((button) => button.addEventListener('click', () => $('rules-dialog').showModal()));
+}
+
+function leave() {
+  socket.emit('leaveGame');
+  state = null;
+  selected.clear();
+  showScreen('menu');
+}
+
+socket.on('joined', ({ code, playerToken }) => {
+  save(STORAGE.code, code);
+  save(STORAGE.token, playerToken);
+  restoreButton();
+});
+
+socket.on('state', (nextState) => {
+  state = nextState;
+  render();
+});
+
+socket.on('notice', ({ message }) => toast(message));
+socket.on('reveal', showReveal);
+socket.on('connect', () => {
+  const code = read(STORAGE.code);
+  const token = read(STORAGE.token);
+  if (code && token && !state) socket.emit('rejoinGame', { code, playerToken: token });
+});
+socket.on('connect_error', () => toast('Connection trouble. Retrying...'));
+socket.on('disconnect', () => toast('Connection lost. Reconnecting...'));
+
+document.addEventListener('fullscreenchange', () => {
+  settings.fullscreen = Boolean(document.fullscreenElement);
+  persistSettings();
+  renderSettings();
+});
+
+bindEvents();
+renderSettings();
+applySettings();
+restoreButton();

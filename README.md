@@ -1,69 +1,128 @@
-# Liar's Bar
+# Last Call
 
-A web-based multiplayer game with three modes — all share the same revolver: bluff, call LIAR, the loser pulls the trigger. Last one breathing wins.
+Last Call is an original online multiplayer bluffing game for up to 8 players. It is inspired by tense social deduction tavern games, but uses original branding, visuals, rules, UI, and implementation.
 
-- **Liar's Cards** — Kings, Queens, Aces, and wild Jokers. Play 1–3 face down claiming they match the table card.
-- **Liar's Dice** — 5 hidden dice each. Bid quantity × face across all dice (1s are wild). Raise or call.
-- **Poker** — Same flow as Liar's Cards but with a 52-card poker deck plus 2 wild Jokers. Each round picks a random target rank (2–A); you play 1–3 cards face down claiming they match.
+## Features
 
-Built with Node.js + Express + Socket.IO and 2D sprites (no build step, no framework). Designed for one-click deploy to Render.
+- Online multiplayer lobbies with unique 5-character game codes
+- Real-time Socket.io synchronization
+- Up to 8 players per lobby
+- Host migration when the host leaves
+- Ready/unready lobby flow
+- Server-authoritative hands, turns, claims, challenges, life totals, and win checks
+- Duplicate-name, invalid-code, full-lobby, invalid-action, and out-of-turn validation
+- Reconnect tokens stored locally, with mid-game grace handling
+- Premium dark tavern/casino UI with responsive desktop and mobile layouts
+- Local settings panel with iOS-style toggles
+- Render.com-ready Express deployment
 
-## Run locally
+## Local Setup
 
 ```bash
 npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+On Windows PowerShell, if `npm` is blocked by script policy, use:
+
+```bash
+npm.cmd install
+npm.cmd run dev
+```
+
+## Production Start
+
+```bash
 npm start
 ```
 
-Open <http://localhost:3000>. Create a room in one tab, then open more tabs (or share the room code over the network) and join with the code. Minimum 2 players, max 12. The deck scales with player count (each additional 4 players adds another standard 20-card deck) so there are always enough cards.
+The server binds to `process.env.PORT` and serves the static frontend from `public/`.
 
-## Deploy to Render
+## Render.com Deployment
 
-1. Push this folder to a new GitHub repo.
-2. Go to <https://render.com> → **New** → **Web Service** → connect your repo.
-3. Render will auto-detect Node. Confirm:
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Environment:** Node (≥18)
-4. Click **Create Web Service**. Render gives you a public `https://*.onrender.com` URL.
+This repository includes `render.yaml`.
 
-WebSockets work on Render's free tier, so Socket.IO is happy out of the box. The app reads `PORT` from the environment, which Render sets automatically.
+1. Create a new Blueprint on Render.
+2. Point it at this repository.
+3. Render will run `npm install`.
+4. Render will start the service with `npm start`.
 
-> **Note on the free tier:** Render spins down free services after ~15 minutes of inactivity. The first request after sleep takes ~30 seconds. Upgrade or use a keep-alive ping if that matters.
+Required environment variables:
 
-## How to play
+- `PORT`: provided automatically by Render
+- `NODE_ENV`: optional, set to `production` if desired
 
-Each gun has 6 chambers and 1 bullet at a random position. The chamber advances with every shot — it gets more dangerous the longer you live. Last one breathing wins.
+Socket.io runs on the same Express web service, so WebSockets work through Render's normal web service routing.
 
-### Liar's Cards
-- Deck: 6 Kings, 6 Queens, 6 Aces, 2 wild Jokers (scaled up for >4 players).
-- Each round, one rank is the "table card" and everyone is dealt 5 cards.
-- On your turn, play 1–3 cards face down claiming they're the table card (or Jokers), or call LIAR.
-- LIAR revealed: liar shoots if they lied; false accuser shoots if the bluff was clean.
+## Gameplay Rules
 
-### Liar's Dice
-- Everyone rolls 5 hidden dice.
-- Bid format: `quantity × face` (e.g. "5 × 4" — claiming at least five 4s across all players' dice).
-- Each next bid must strictly increase: higher quantity, OR same quantity with higher face.
-- 1s are wild — they count as whatever face is being bid (except when 1 itself is bid).
-- Call LIAR to reveal all dice; if the count meets the bid, the caller loses; otherwise the bidder loses.
+1. Create a game and share the lobby code, or join an existing game with a code.
+2. Everyone readies up. The host starts the game.
+3. Each player begins with 3 lives.
+4. Each round deals 5 hidden cards to every surviving player.
+5. The table names a claim rank: `Crows`, `Moons`, or `Keys`.
+6. On your turn, play 1-3 cards face down and claim they match the round rank.
+7. `Ember` cards are wild and count as any rank.
+8. The next player can either make their own claim or call bluff.
+9. If the revealed cards all match, the caller loses a life.
+10. If any revealed card fails, the bluffer loses a life.
+11. Players with 0 lives become spectators.
+12. The last surviving player wins.
 
-### Poker
-- Standard 52-card deck plus 2 wild Jokers (scaled up if needed for big games).
-- Each round one rank (2 through A) is randomly chosen as the target. Each player is dealt 5 cards.
-- On your turn, play 1–3 cards face down claiming they're the target rank (Jokers always count as a match), or call LIAR.
-- LIAR resolves the same way as Liar's Cards: liar shoots if they lied, false accuser shoots otherwise.
+## Controls
 
-## Project layout
+- `Create Game`: starts a new lobby and generates a code
+- `Join Game`: joins an existing lobby by code
+- `Ready` / `Unready`: toggles lobby readiness
+- `Start Game`: host-only, enabled when the lobby is ready
+- Card click/tap: selects or deselects a card
+- `Play Selected`: submits 1-3 selected cards as the current rank
+- `Call Bluff`: challenges the previous claim
+- `Settings`: opens local UI/game preferences
 
-```
-liars-bar/
-├── server.js         # Express + Socket.IO server, all game logic
-├── package.json
+## Settings
+
+Settings are saved in `localStorage` and apply immediately where possible.
+
+- Sound effects
+- Music preference
+- Reduced motion
+- Fullscreen mode
+- Action log visibility
+- Cinematic dark mode
+
+## Project Structure
+
+```text
+.
+├── server.js          # Express, Socket.io, room management, authoritative game engine
 ├── public/
-│   ├── index.html
-│   ├── style.css
-│   └── client.js     # Vanilla JS client
+│   ├── index.html     # App shell and accessible UI structure
+│   ├── client.js      # Socket client, rendering, settings, interactions
+│   └── style.css      # Responsive cinematic tavern/casino visual system
+├── package.json       # Scripts and dependencies
+├── render.yaml        # Render Blueprint
 └── README.md
 ```
-"# Liars-Bar-Like" 
+
+## Quality Checks
+
+Run:
+
+```bash
+npm test
+```
+
+Manual verification performed during implementation:
+
+- Local server start on a test port
+- Browser load of the menu and lobby with no console errors
+- Socket.io multiplayer simulation covering create, join, ready, start, play, challenge, reveal, and state sync
+
+## Known Limitations
+
+- Lobby and game state are in memory, so active games reset when the server restarts.
+- Reconnect is best-effort and depends on the same browser retaining its local reconnect token.
+- Voice/video chat is not included; players should use an external call if they want live table talk.
