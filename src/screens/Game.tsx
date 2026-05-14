@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGameStore } from '../store/game';
 import { Chip, Icon, avatarInitial } from '../components/primitives';
 import { GameCard } from '../components/Card';
 import { BellOverlay } from '../components/BellOverlay';
+import { RevealOverlay } from '../components/RevealOverlay';
 import { getSocket } from '../lib/socket';
 import { useCountdown } from '../lib/useCountdown';
 import type { Card, PublicPlayer } from '@shared/types';
@@ -16,7 +17,6 @@ export function Game() {
   const playerId = useGameStore((s) => s.playerId);
   const speech = useGameStore((s) => s.speech);
   const reactions = useGameStore((s) => s.reactions);
-  const reveal = useGameStore((s) => s.reveal);
   const pushToast = useGameStore((s) => s.pushToast);
   const setRoute = useGameStore((s) => s.setRoute);
   const reset = useGameStore((s) => s.reset);
@@ -25,6 +25,24 @@ export function Game() {
   const [confirming, setConfirming] = useState<null | {
     cards: Card[];
   }>(null);
+
+  // Prune card IDs that are no longer in our hand. The hand re-deals on a
+  // new round (and auto-plays don't go through the explicit clear path), so
+  // the selection set can otherwise hold stale IDs and report a phantom
+  // "Selected: 3/3" when only one card is actually selected.
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const handIds = new Set(hand.map((c) => c.id));
+      let dirty = false;
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (handIds.has(id)) next.add(id);
+        else dirty = true;
+      }
+      return dirty ? next : prev;
+    });
+  }, [hand]);
 
   if (!lobby || !lobby.game) return null;
   const game = lobby.game;
@@ -54,6 +72,23 @@ export function Game() {
     game.phase === 'bell'
       ? lobby.players.find((p) => p.seat === game.turnSeat) ?? null
       : null;
+
+  // Reveal-phase derived players (for the RevealOverlay).
+  const reveal = game.reveal;
+  const revealCards =
+    game.phase === 'reveal' && game.lastPlay?.cardsRevealed
+      ? game.lastPlay.cardsRevealed
+      : null;
+  const revealBluffer =
+    reveal && game.lastPlay
+      ? lobby.players.find((p) => p.seat === game.lastPlay!.fromSeat) ?? null
+      : null;
+  const revealChallenger = reveal
+    ? lobby.players.find((p) => p.seat === reveal.challengerSeat) ?? null
+    : null;
+  const revealLoser = reveal
+    ? lobby.players.find((p) => p.seat === reveal.loserSeat) ?? null
+    : null;
 
   // Seat positions — rotate so the local player sits at the bottom.
   const seatLayout = useMemo(() => {
@@ -552,19 +587,32 @@ export function Game() {
         )}
       </div>
 
-      {/* Bell overlay */}
+      {/* Reveal overlay — runs first, holds for REVEAL_PHASE_MS on the server */}
       <AnimatePresence>
-        {(game.phase === 'bell' ||
-          (game.phase === 'reveal' && bellPlayer)) &&
-          bellPlayer && (
-            <BellOverlay
-              player={bellPlayer}
-              isYou={isYourBell}
-              result={game.bell}
-              deadline={isYourBell ? game.turnDeadline ?? null : null}
-              onPull={pullBell}
-            />
-          )}
+        {game.phase === 'reveal' && reveal && revealCards && game.lastPlay && (
+          <RevealOverlay
+            cards={revealCards}
+            claimedRank={game.lastPlay.claimedRank}
+            claimedCount={game.lastPlay.count}
+            lying={reveal.lying}
+            bluffer={revealBluffer}
+            challenger={revealChallenger}
+            loser={revealLoser}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Bell overlay — takes over once the reveal phase finishes */}
+      <AnimatePresence>
+        {game.phase === 'bell' && bellPlayer && (
+          <BellOverlay
+            player={bellPlayer}
+            isYou={isYourBell}
+            result={game.bell}
+            deadline={isYourBell ? game.turnDeadline ?? null : null}
+            onPull={pullBell}
+          />
+        )}
       </AnimatePresence>
 
       {/* Confirm play modal */}
@@ -647,36 +695,6 @@ export function Game() {
         {chatOpen && <EventLog onClose={() => setChatOpen(false)} />}
       </AnimatePresence>
 
-      {/* Reveal flash banner */}
-      <AnimatePresence>
-        {reveal && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              top: 80,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              padding: '14px 22px',
-              borderRadius: 999,
-              background: reveal.lying
-                ? 'color-mix(in oklab, var(--ember) 30%, var(--bg-2))'
-                : 'color-mix(in oklab, oklch(0.78 0.16 145) 30%, var(--bg-2))',
-              border: '1px solid var(--hairline-strong)',
-              color: 'var(--ink-0)',
-              fontFamily: 'var(--f-display)',
-              fontSize: 22,
-              letterSpacing: '.08em',
-              zIndex: 55,
-              boxShadow: '0 12px 40px rgba(0,0,0,.5)',
-            }}
-          >
-            {reveal.lying ? 'LIAR EXPOSED' : 'HONEST · CALL FAILED'}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import {
   PLAYER_MAX,
   PLAYER_MIN,
   TURN_TIMEOUT_MS,
+  type ChallengeReveal,
   type Card,
   type CreateLobbyPayload,
   type GameEvent,
@@ -49,6 +50,9 @@ interface InternalGameState {
   bell: BellRoll | null;
   winnerId: string | null;
   pendingNextStarterSeat: number | null;
+  /** Seat that owes the bell pull once the reveal phase finishes. */
+  pendingBellSeat: number | null;
+  reveal: ChallengeReveal | null;
   /** ms since epoch — when the current actor must have acted by. */
   turnDeadline: number | null;
 }
@@ -295,6 +299,8 @@ export class Lobby {
       bell: null,
       winnerId: null,
       pendingNextStarterSeat: null,
+      pendingBellSeat: null,
+      reveal: null,
       turnDeadline: null,
     };
     const events: GameEvent[] = [
@@ -325,6 +331,8 @@ export class Lobby {
     this.game.pile = [];
     this.game.bell = null;
     this.game.pendingNextStarterSeat = null;
+    this.game.pendingBellSeat = null;
+    this.game.reveal = null;
 
     // Fresh deck each round — keeps card IDs unique within a round and avoids
     // any leftover-card weirdness between deals.
@@ -425,11 +433,13 @@ export class Lobby {
       (c) => c.suit !== currentRank && c.suit !== 'wild'
     );
     const loserSeat = lying ? this.game.lastPlay.fromSeat : s.seat;
+    const challengerSeat = s.seat;
     events.push({
       type: 'reveal',
       cards: this.game.lastPlay.cards,
       lying,
       loserSeat,
+      challengerSeat,
     });
     events.push({
       type: 'log',
@@ -438,13 +448,52 @@ export class Lobby {
         : `Honest. ${s.name} pays for the bad call.`,
       ts: Date.now(),
     });
-    this.game.phase = 'bell';
+    // Reveal phase: cards flip up, players read the outcome. The handler
+    // schedules advanceFromReveal() after REVEAL_PHASE_MS, which transitions
+    // to the bell phase.
+    this.game.phase = 'reveal';
+    this.game.reveal = { lying, challengerSeat, loserSeat };
     this.game.turnSeat = loserSeat;
+    this.game.pendingBellSeat = loserSeat;
     // The bell loser starts the next round (if they survive). If they're
     // eliminated, the round will fall through to the next alive seat.
     this.game.pendingNextStarterSeat = loserSeat;
     this.refreshDeadline();
 
+    return { ok: true, events, handsToPush: [], changed: true };
+  }
+
+  /**
+   * Transition from the reveal phase to the bell phase. Called by the
+   * socket handler after the reveal hold has elapsed. No-op if state has
+   * already moved past reveal.
+   */
+  advanceFromReveal(): ActionOutcome {
+    if (!this.game) return fail('Game not started.');
+    if (this.game.phase !== 'reveal') {
+      return { ok: true, events: [], handsToPush: [], changed: false };
+    }
+    const pending = this.game.pendingBellSeat;
+    const events: GameEvent[] = [];
+    // Safety: if the loser has vanished (left the lobby during reveal),
+    // skip the bell and just start the next round.
+    const player = pending != null ? this.playerBySeat(pending) : null;
+    if (!player || player.out) {
+      const startSeat = this.nearestAliveSeatFrom(
+        this.game.pendingNextStarterSeat ?? pending ?? 0
+      );
+      events.push({ type: 'roundEnd', aliveSeats: this.aliveSeats() });
+      this.beginRound(startSeat, events);
+      return {
+        ok: true,
+        events,
+        handsToPush: this.aliveSeatIds(),
+        changed: true,
+      };
+    }
+    this.game.phase = 'bell';
+    this.game.turnSeat = pending!;
+    this.refreshDeadline();
     return { ok: true, events, handsToPush: [], changed: true };
   }
 
@@ -755,6 +804,7 @@ export class Lobby {
         winnerId: this.game.winnerId,
         aliveSeats: this.aliveSeats(),
         turnDeadline: this.game.turnDeadline,
+        reveal: this.game.reveal,
       };
     }
 

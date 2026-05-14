@@ -14,6 +14,7 @@ import {
   NAME_MAX,
   PLAYER_MAX,
   PLAYER_MIN,
+  REVEAL_PHASE_MS,
 } from '../../shared/types.ts';
 import { Lobby, LobbyManager } from '../game/lobby.ts';
 import { SessionManager, type PlayerSession } from '../game/sessions.ts';
@@ -291,8 +292,12 @@ function bindSocket(ctx: AppContext, socket: IOSocket): void {
     emitLobbyState(ctx, lobby);
     emitEvents(ctx, lobby, outcome.events);
     for (const id of outcome.handsToPush) emitHand(ctx, lobby, id);
-    if (lobby.game?.phase === 'match_end') recordMatch(ctx, lobby);
-    scheduleTurnTimer(ctx, lobby);
+    // callLiar transitions to the reveal phase. Hold there so the players
+    // can read the cards, then advance to the bell phase via timer.
+    clearTurnTimer(ctx, lobby.code);
+    if (lobby.game?.phase === 'reveal') {
+      scheduleAfterReveal(ctx, lobby);
+    }
     ack({ ok: true });
   });
 
@@ -472,6 +477,26 @@ function schedulePostBellAdvance(ctx: AppContext, lobby: Lobby): void {
     }
     scheduleTurnTimer(ctx, lobby);
   }, BELL_ADVANCE_DELAY_MS).unref?.();
+}
+
+/**
+ * After a LIAR call, hold on the reveal phase for REVEAL_PHASE_MS so
+ * players can see the cards face-up + lying-or-not result. Then transition
+ * to the bell phase.
+ */
+function scheduleAfterReveal(ctx: AppContext, lobby: Lobby): void {
+  setTimeout(() => {
+    const advance = lobby.advanceFromReveal();
+    if (!advance.changed) return;
+    emitLobbyState(ctx, lobby);
+    emitEvents(ctx, lobby, advance.events);
+    for (const id of advance.handsToPush) emitHand(ctx, lobby, id);
+    if (lobby.game?.phase === 'match_end') {
+      recordMatch(ctx, lobby);
+      broadcastLobbyList(ctx);
+    }
+    scheduleTurnTimer(ctx, lobby);
+  }, REVEAL_PHASE_MS).unref?.();
 }
 
 function pushSystemChat(ctx: AppContext, lobby: Lobby, text: string): void {

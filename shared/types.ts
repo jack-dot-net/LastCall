@@ -55,6 +55,12 @@ export interface BellRoll {
   eliminated: boolean;
 }
 
+export interface ChallengeReveal {
+  lying: boolean;
+  challengerSeat: number;
+  loserSeat: number;
+}
+
 export interface PublicGameState {
   phase: GamePhase;
   round: number;
@@ -74,11 +80,18 @@ export interface PublicGameState {
    * when no timer is active (e.g. match end, between rounds).
    */
   turnDeadline: number | null;
+  /**
+   * Set when a challenge has resolved. Stays populated through the reveal
+   * and bell phases; cleared when the next round deals.
+   */
+  reveal: ChallengeReveal | null;
 }
 
 /** Server enforces these — clients render them for visual countdown. */
 export const TURN_TIMEOUT_MS = 20_000;
 export const BELL_TIMEOUT_MS = 5_000;
+/** How long the reveal phase holds before the bell phase takes over. */
+export const REVEAL_PHASE_MS = 3_000;
 
 export interface Lobby {
   code: string;
@@ -120,7 +133,13 @@ export type GameEvent =
   | { type: 'roundStart'; rank: Rank; round: number }
   | { type: 'play'; fromSeat: number; count: number; claimedRank: Rank }
   | { type: 'callLiar'; fromSeat: number }
-  | { type: 'reveal'; cards: Card[]; lying: boolean; loserSeat: number }
+  | {
+      type: 'reveal';
+      cards: Card[];
+      lying: boolean;
+      loserSeat: number;
+      challengerSeat: number;
+    }
   | { type: 'bellResult'; result: BellRoll }
   | { type: 'roundEnd'; aliveSeats: number[] }
   | { type: 'matchEnd'; winnerSeat: number };

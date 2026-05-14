@@ -89,7 +89,6 @@ interface GameStore {
   chat: ChatMessage[];
   speech: Record<number, string>;
   reactions: Record<number, string>;
-  reveal: { cards: Card[]; lying: boolean; loserSeat: number } | null;
   joinError: string | null;
 
   // Actions
@@ -107,7 +106,6 @@ interface GameStore {
   handleGameEvent: (event: GameEvent) => void;
   setSpeech: (seat: number, text: string) => void;
   setReaction: (seat: number, emoji: string) => void;
-  setReveal: (r: GameStore['reveal']) => void;
   setJoinError: (e: string | null) => void;
   reset: () => void;
 }
@@ -132,7 +130,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
   chat: [],
   speech: {},
   reactions: {},
-  reveal: null,
   joinError: null,
 
   setRoute: (route) => set({ route }),
@@ -165,7 +162,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set((s) => ({ speech: { ...s.speech, [seat]: text } })),
   setReaction: (seat, emoji) =>
     set((s) => ({ reactions: { ...s.reactions, [seat]: emoji } })),
-  setReveal: (reveal) => set({ reveal }),
   setJoinError: (joinError) => set({ joinError }),
   handleGameEvent: (event) => {
     const state = get();
@@ -196,18 +192,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
         );
         break;
       case 'reveal':
-        state.setReveal({
-          cards: event.cards,
-          lying: event.lying,
-          loserSeat: event.loserSeat,
-        });
+        // The full visual lives in <RevealOverlay /> driven by game state.
+        // The toast is still nice for the corner-of-eye signal.
         state.pushToast(
           event.lying ? 'LIAR EXPOSED' : 'HONEST · CHALLENGER PAYS',
           event.lying ? 'success' : 'warn'
         );
-        setTimeout(() => {
-          set({ reveal: null });
-        }, 2200);
         break;
       case 'bellResult':
         state.pushToast(
@@ -234,7 +224,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       chat: [],
       speech: {},
       reactions: {},
-      reveal: null,
       joinError: null,
     }),
 }));
